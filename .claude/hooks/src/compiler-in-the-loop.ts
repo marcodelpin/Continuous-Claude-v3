@@ -69,7 +69,7 @@ function saveState(state: CompilerState): void {
 
 function runLeanCompiler(filePath: string, cwd: string): { success: boolean; output: string; sorries: string[] } {
   // Add elan to PATH
-  const home = process.env.HOME || '';
+  const home = process.env.HOME || process.env.USERPROFILE || '';
   const elanBin = join(home, '.elan', 'bin');
   const pathWithElan = `${elanBin}:${process.env.PATH}`;
 

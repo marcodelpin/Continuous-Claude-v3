@@ -2,7 +2,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { spawn } from "child_process";
-var EXTRACTOR_LOCK = path.join(process.env.HOME || "", ".claude", "braintrust-extractor.lock");
+var EXTRACTOR_LOCK = path.join(process.env.HOME || process.env.USERPROFILE || "", ".claude", "braintrust-extractor.lock");
 var LOCK_MAX_AGE_MS = 5 * 60 * 1e3;
 function isExtractorRunning() {
   if (!fs.existsSync(EXTRACTOR_LOCK)) {
@@ -87,7 +87,7 @@ async function main() {
       return;
     }
     const learnScript = path.join(projectDir, "scripts", "braintrust_analyze.py");
-    const globalScript = path.join(process.env.HOME || "", ".claude", "scripts", "braintrust_analyze.py");
+    const globalScript = path.join(process.env.HOME || process.env.USERPROFILE || "", ".claude", "scripts", "braintrust_analyze.py");
     const scriptPath = fs.existsSync(learnScript) ? learnScript : globalScript;
     if (fs.existsSync(scriptPath)) {
       if (isExtractorRunning()) {

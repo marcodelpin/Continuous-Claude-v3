@@ -23,7 +23,7 @@ function saveState(state) {
   writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
 }
 function runLeanCompiler(filePath, cwd) {
-  const home = process.env.HOME || "";
+  const home = process.env.HOME || process.env.USERPROFILE || "";
   const elanBin = join(home, ".elan", "bin");
   const pathWithElan = `${elanBin}:${process.env.PATH}`;
   try {

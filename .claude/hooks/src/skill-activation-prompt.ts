@@ -183,7 +183,7 @@ async function main() {
 
         // Load skill rules (try project first, then global)
         const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
-        const homeDir = process.env.HOME || '';
+        const homeDir = process.env.HOME || process.env.USERPROFILE || '';
         const projectRulesPath = join(projectDir, '.claude', 'skills', 'skill-rules.json');
         const globalRulesPath = join(homeDir, '.claude', 'skills', 'skill-rules.json');
 

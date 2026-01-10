@@ -1,7 +1,32 @@
 // src/memory-awareness.ts
 import { readFileSync } from "fs";
 import { spawnSync } from "child_process";
+
+// src/shared/opc-path.ts
+import { existsSync } from "fs";
 import { join } from "path";
+function getOpcDir() {
+  const envOpcDir = process.env.CLAUDE_OPC_DIR;
+  if (envOpcDir && existsSync(envOpcDir)) {
+    return envOpcDir;
+  }
+  const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  const localOpc = join(projectDir, "opc");
+  if (existsSync(localOpc)) {
+    return localOpc;
+  }
+  const homeDir = process.env.HOME || process.env.USERPROFILE || "";
+  if (homeDir) {
+    const globalClaude = join(homeDir, ".claude");
+    const globalScripts = join(globalClaude, "scripts", "core");
+    if (existsSync(globalScripts)) {
+      return globalClaude;
+    }
+  }
+  return null;
+}
+
+// src/memory-awareness.ts
 function readStdin() {
   return readFileSync(0, "utf-8");
 }
@@ -164,7 +189,8 @@ function extractKeywords(prompt) {
 }
 function checkMemoryRelevance(intent, projectDir) {
   if (!intent || intent.length < 3) return null;
-  const opcDir = join(projectDir, "opc");
+  const opcDir = getOpcDir();
+  if (!opcDir) return null;
   const searchTerm = intent.replace(/[_\/]/g, " ").replace(/\b\w{1,2}\b/g, "").replace(/\s+/g, " ").trim();
   const result = spawnSync("uv", [
     "run",

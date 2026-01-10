@@ -168,6 +168,13 @@ function queryDaemonSync(query, projectDir) {
 function readStdin() {
   return readFileSync2(0, "utf-8");
 }
+function getSemanticIndexStatus(projectDir) {
+  const indexPath = join2(projectDir, ".tldr", "cache", "semantic", "index.faiss");
+  return {
+    exists: existsSync2(indexPath),
+    path: indexPath
+  };
+}
 function getCacheStatus(projectDir) {
   const cacheDir = join2(projectDir, ".claude", "cache", "tldr");
   if (!existsSync2(cacheDir)) {
@@ -228,8 +235,10 @@ async function main() {
   if (cache.files.dead) available.push("dead");
   const ageStr = cache.age_hours !== void 0 ? ` (${cache.age_hours}h old)` : "";
   const freshness = cache.age_hours !== void 0 && cache.age_hours > 168 ? " \u26A0\uFE0F STALE" : "";
+  const semantic = getSemanticIndexStatus(projectDir);
+  const semanticWarning = semantic.exists ? "" : "\n\u26A0\uFE0F No semantic index found. Run `tldr semantic index .` for AI-powered code search.";
   const cacheInfo = cache.exists ? `${available.join(", ")}` : "building...";
-  const message = `\u{1F4CA} TLDR cache${ageStr}${freshness}${warmStatus}: ${cacheInfo}. Query with: cat .claude/cache/tldr/<file>.json | jq`;
+  const message = `\u{1F4CA} TLDR cache${ageStr}${freshness}${warmStatus}: ${cacheInfo}${semanticWarning}`;
   console.log(message);
 }
 main().catch(() => {

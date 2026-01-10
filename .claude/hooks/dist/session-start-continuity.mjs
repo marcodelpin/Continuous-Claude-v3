@@ -218,7 +218,7 @@ ${ledgerSection}`;
               additionalContext += `
 To mark an outcome:
 \`\`\`bash
-uv run python scripts/core/artifact_mark.py --handoff <ID> --outcome SUCCEEDED|PARTIAL_PLUS|PARTIAL_MINUS|FAILED
+cd ~/.claude && uv run python scripts/core/artifact_mark.py --handoff <ID> --outcome SUCCEEDED|PARTIAL_PLUS|PARTIAL_MINUS|FAILED
 \`\`\`
 `;
             }
@@ -298,7 +298,7 @@ ${ledgerContent}`;
             additionalContext += `
 To mark an outcome:
 \`\`\`bash
-uv run python scripts/core/artifact_mark.py --handoff <ID> --outcome SUCCEEDED|PARTIAL_PLUS|PARTIAL_MINUS|FAILED
+cd ~/.claude && uv run python scripts/core/artifact_mark.py --handoff <ID> --outcome SUCCEEDED|PARTIAL_PLUS|PARTIAL_MINUS|FAILED
 \`\`\`
 `;
           }

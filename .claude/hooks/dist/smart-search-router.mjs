@@ -433,9 +433,9 @@ async function main() {
 **Option 1 - TLDR Skill:**
 /tldr-search ${pattern}
 
-**Option 2 - Direct API:**
+**Option 2 - Direct CLI:**
 \`\`\`bash
-uv run python opc/packages/tldr-code/scripts/tldr_search.py "${pattern}"
+tldr search "${pattern}" .
 \`\`\`
 
 **Option 3 - Read specific file (TLDR auto-enriches):**
