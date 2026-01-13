@@ -28,7 +28,7 @@ export function getSessionIdFile(options: { createDir?: boolean } = {}): string 
 
   if (options.createDir) {
     try {
-      mkdirSync(claudeDir, { recursive: true });
+      mkdirSync(claudeDir, { recursive: true, mode: 0o700 });
     } catch { /* ignore mkdir errors */ }
   }
 
@@ -59,7 +59,7 @@ export function generateSessionId(): string {
 export function writeSessionId(sessionId: string): boolean {
   try {
     const filePath = getSessionIdFile({ createDir: true });
-    writeFileSync(filePath, sessionId, 'utf-8');
+    writeFileSync(filePath, sessionId, { encoding: 'utf-8', mode: 0o600 });
     return true;
   } catch {
     return false;

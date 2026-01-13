@@ -36,7 +36,9 @@ export function main(): void {
 
   // Store session ID in environment and file for other hooks
   process.env.COORDINATION_SESSION_ID = sessionId;
-  writeSessionId(sessionId);
+  if (!writeSessionId(sessionId)) {
+    console.error(`[session-register] WARNING: Failed to persist session ID ${sessionId} to file`);
+  }
 
   // Register session in PostgreSQL
   const registerResult = registerSession(sessionId, project, '');

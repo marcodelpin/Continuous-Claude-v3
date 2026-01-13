@@ -195,7 +195,7 @@ function getSessionIdFile(options = {}) {
   const claudeDir = join2(process.env.HOME || "/tmp", ".claude");
   if (options.createDir) {
     try {
-      mkdirSync(claudeDir, { recursive: true });
+      mkdirSync(claudeDir, { recursive: true, mode: 448 });
     } catch {
     }
   }
@@ -211,7 +211,7 @@ function generateSessionId() {
 function writeSessionId(sessionId) {
   try {
     const filePath = getSessionIdFile({ createDir: true });
-    writeFileSync(filePath, sessionId, "utf-8");
+    writeFileSync(filePath, sessionId, { encoding: "utf-8", mode: 384 });
     return true;
   } catch {
     return false;
@@ -235,7 +235,9 @@ function main() {
   const project = getProject();
   const projectName = project.split("/").pop() || "unknown";
   process.env.COORDINATION_SESSION_ID = sessionId;
-  writeSessionId(sessionId);
+  if (!writeSessionId(sessionId)) {
+    console.error(`[session-register] WARNING: Failed to persist session ID ${sessionId} to file`);
+  }
   const registerResult = registerSession(sessionId, project, "");
   const sessionsResult = getActiveSessions(project);
   const otherSessions = sessionsResult.sessions.filter((s) => s.id !== sessionId);

@@ -83,6 +83,8 @@ describe('writeSessionId and readSessionId', () => {
   afterEach(() => {
     if (originalHome) {
       process.env.HOME = originalHome;
+    } else {
+      delete process.env.HOME;
     }
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
@@ -128,7 +130,11 @@ describe('getSessionId', () => {
   });
 
   afterEach(() => {
-    if (originalHome) process.env.HOME = originalHome;
+    if (originalHome) {
+      process.env.HOME = originalHome;
+    } else {
+      delete process.env.HOME;
+    }
     if (originalCoordId) {
       process.env.COORDINATION_SESSION_ID = originalCoordId;
     } else {
@@ -212,7 +218,11 @@ describe('cross-process consistency', () => {
   });
 
   afterEach(() => {
-    if (originalHome) process.env.HOME = originalHome;
+    if (originalHome) {
+      process.env.HOME = originalHome;
+    } else {
+      delete process.env.HOME;
+    }
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 

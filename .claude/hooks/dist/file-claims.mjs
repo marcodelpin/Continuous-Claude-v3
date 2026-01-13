@@ -168,7 +168,7 @@ function getSessionIdFile(options = {}) {
   const claudeDir = join2(process.env.HOME || "/tmp", ".claude");
   if (options.createDir) {
     try {
-      mkdirSync(claudeDir, { recursive: true });
+      mkdirSync(claudeDir, { recursive: true, mode: 448 });
     } catch {
     }
   }
