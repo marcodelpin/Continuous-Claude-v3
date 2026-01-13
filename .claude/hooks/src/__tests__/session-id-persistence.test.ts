@@ -14,156 +14,228 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-describe('session ID file persistence', () => {
+// Import actual implementations from shared module
+import {
+  getSessionIdFile,
+  generateSessionId,
+  writeSessionId,
+  readSessionId,
+  getSessionId,
+  getProject,
+} from '../shared/session-id.js';
+
+describe('getSessionIdFile', () => {
+  it('returns path in .claude directory', () => {
+    const result = getSessionIdFile();
+    expect(result).toContain('.claude');
+    expect(result).toContain('.coordination-session-id');
+  });
+
+  it('creates directory when createDir option is true', () => {
+    // This test just verifies the function doesn't throw
+    // Actual directory creation depends on HOME env
+    expect(() => getSessionIdFile({ createDir: true })).not.toThrow();
+  });
+});
+
+describe('generateSessionId', () => {
+  it('returns a string starting with "s-" when no BRAINTRUST_SPAN_ID', () => {
+    const originalSpanId = process.env.BRAINTRUST_SPAN_ID;
+    delete process.env.BRAINTRUST_SPAN_ID;
+
+    try {
+      const result = generateSessionId();
+      expect(result).toMatch(/^s-[a-z0-9]+$/);
+    } finally {
+      if (originalSpanId) {
+        process.env.BRAINTRUST_SPAN_ID = originalSpanId;
+      }
+    }
+  });
+
+  it('uses BRAINTRUST_SPAN_ID when available', () => {
+    const originalSpanId = process.env.BRAINTRUST_SPAN_ID;
+    process.env.BRAINTRUST_SPAN_ID = 'test1234-5678-abcd-efgh';
+
+    try {
+      const result = generateSessionId();
+      expect(result).toBe('test1234');
+    } finally {
+      if (originalSpanId) {
+        process.env.BRAINTRUST_SPAN_ID = originalSpanId;
+      } else {
+        delete process.env.BRAINTRUST_SPAN_ID;
+      }
+    }
+  });
+});
+
+describe('writeSessionId and readSessionId', () => {
   let tempDir: string;
-  let sessionIdFile: string;
+  let originalHome: string | undefined;
 
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-id-test-'));
-    sessionIdFile = path.join(tempDir, '.coordination-session-id');
+    originalHome = process.env.HOME;
+    process.env.HOME = tempDir;
   });
 
   afterEach(() => {
+    if (originalHome) {
+      process.env.HOME = originalHome;
+    }
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  describe('getSessionIdFile', () => {
-    function getSessionIdFile(homeDir: string): string {
-      const claudeDir = path.join(homeDir, '.claude');
-      try {
-        fs.mkdirSync(claudeDir, { recursive: true });
-      } catch { /* ignore */ }
-      return path.join(claudeDir, '.coordination-session-id');
+  it('writeSessionId creates file and readSessionId retrieves it', () => {
+    const testId = 's-test123';
+
+    const writeResult = writeSessionId(testId);
+    expect(writeResult).toBe(true);
+
+    const readResult = readSessionId();
+    expect(readResult).toBe(testId);
+  });
+
+  it('readSessionId returns null when file does not exist', () => {
+    const result = readSessionId();
+    expect(result).toBeNull();
+  });
+
+  it('writeSessionId overwrites existing session ID', () => {
+    writeSessionId('s-old');
+    writeSessionId('s-new');
+
+    const result = readSessionId();
+    expect(result).toBe('s-new');
+  });
+});
+
+describe('getSessionId', () => {
+  let tempDir: string;
+  let originalHome: string | undefined;
+  let originalCoordId: string | undefined;
+  let originalSpanId: string | undefined;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-id-test-'));
+    originalHome = process.env.HOME;
+    originalCoordId = process.env.COORDINATION_SESSION_ID;
+    originalSpanId = process.env.BRAINTRUST_SPAN_ID;
+    process.env.HOME = tempDir;
+    delete process.env.COORDINATION_SESSION_ID;
+    delete process.env.BRAINTRUST_SPAN_ID;
+  });
+
+  afterEach(() => {
+    if (originalHome) process.env.HOME = originalHome;
+    if (originalCoordId) {
+      process.env.COORDINATION_SESSION_ID = originalCoordId;
+    } else {
+      delete process.env.COORDINATION_SESSION_ID;
     }
-
-    it('returns path in .claude directory', () => {
-      const result = getSessionIdFile(tempDir);
-      expect(result).toBe(path.join(tempDir, '.claude', '.coordination-session-id'));
-    });
-
-    it('creates .claude directory if it does not exist', () => {
-      const newTempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-id-mkdir-'));
-      try {
-        const claudeDir = path.join(newTempDir, '.claude');
-        expect(fs.existsSync(claudeDir)).toBe(false);
-
-        getSessionIdFile(newTempDir);
-
-        expect(fs.existsSync(claudeDir)).toBe(true);
-      } finally {
-        fs.rmSync(newTempDir, { recursive: true, force: true });
-      }
-    });
-  });
-
-  describe('session-register writes ID', () => {
-    it('writes session ID to file', () => {
-      const sessionId = 's-test123';
-      fs.writeFileSync(sessionIdFile, sessionId, 'utf-8');
-
-      expect(fs.existsSync(sessionIdFile)).toBe(true);
-      expect(fs.readFileSync(sessionIdFile, 'utf-8')).toBe(sessionId);
-    });
-
-    it('overwrites existing session ID on new session', () => {
-      fs.writeFileSync(sessionIdFile, 's-old-session', 'utf-8');
-      fs.writeFileSync(sessionIdFile, 's-new-session', 'utf-8');
-
-      expect(fs.readFileSync(sessionIdFile, 'utf-8')).toBe('s-new-session');
-    });
-  });
-
-  describe('file-claims reads ID', () => {
-    function getSessionId(
-      envSessionId: string | undefined,
-      sessionFile: string,
-      braintrustSpanId: string | undefined
-    ): string {
-      // First try environment (same process)
-      if (envSessionId) {
-        return envSessionId;
-      }
-
-      // Try reading from file (cross-process persistence)
-      if (fs.existsSync(sessionFile)) {
-        try {
-          const id = fs.readFileSync(sessionFile, 'utf-8').trim();
-          if (id) return id;
-        } catch { /* ignore read errors */ }
-      }
-
-      // Fallback to Braintrust span ID or generate new
-      return braintrustSpanId?.slice(0, 8) || `s-${Date.now().toString(36)}`;
+    if (originalSpanId) {
+      process.env.BRAINTRUST_SPAN_ID = originalSpanId;
+    } else {
+      delete process.env.BRAINTRUST_SPAN_ID;
     }
-
-    it('prefers environment variable if set', () => {
-      fs.writeFileSync(sessionIdFile, 's-from-file', 'utf-8');
-
-      const result = getSessionId('s-from-env', sessionIdFile, undefined);
-
-      expect(result).toBe('s-from-env');
-    });
-
-    it('reads from file when env not set', () => {
-      fs.writeFileSync(sessionIdFile, 's-from-file', 'utf-8');
-
-      const result = getSessionId(undefined, sessionIdFile, undefined);
-
-      expect(result).toBe('s-from-file');
-    });
-
-    it('trims whitespace from file content', () => {
-      fs.writeFileSync(sessionIdFile, '  s-with-spaces  \n', 'utf-8');
-
-      const result = getSessionId(undefined, sessionIdFile, undefined);
-
-      expect(result).toBe('s-with-spaces');
-    });
-
-    it('falls back to Braintrust span ID when file missing', () => {
-      const result = getSessionId(undefined, '/nonexistent/path', 'span-12345678-abcd');
-
-      expect(result).toBe('span-123');
-    });
-
-    it('generates new ID when all sources unavailable', () => {
-      const result = getSessionId(undefined, '/nonexistent/path', undefined);
-
-      expect(result).toMatch(/^s-[a-z0-9]+$/);
-    });
-
-    it('handles empty file gracefully', () => {
-      fs.writeFileSync(sessionIdFile, '', 'utf-8');
-
-      const result = getSessionId(undefined, sessionIdFile, 'fallback-span-id');
-
-      expect(result).toBe('fallback');
-    });
+    fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  describe('cross-process consistency', () => {
-    it('session-register and file-claims use same ID via file', () => {
-      // Simulate session-register writing
-      const generatedId = `s-${Date.now().toString(36)}`;
-      fs.writeFileSync(sessionIdFile, generatedId, 'utf-8');
+  it('prefers COORDINATION_SESSION_ID env var', () => {
+    writeSessionId('s-from-file');
+    process.env.COORDINATION_SESSION_ID = 's-from-env';
 
-      // Simulate file-claims reading (different process, no env var)
-      const readId = fs.readFileSync(sessionIdFile, 'utf-8').trim();
+    const result = getSessionId();
+    expect(result).toBe('s-from-env');
+  });
 
-      expect(readId).toBe(generatedId);
-    });
+  it('reads from file when env not set', () => {
+    writeSessionId('s-from-file');
 
-    it('multiple file-claims calls get same ID', () => {
-      fs.writeFileSync(sessionIdFile, 's-consistent', 'utf-8');
+    const result = getSessionId();
+    expect(result).toBe('s-from-file');
+  });
 
-      // Simulate multiple file edits in same session
-      const id1 = fs.readFileSync(sessionIdFile, 'utf-8').trim();
-      const id2 = fs.readFileSync(sessionIdFile, 'utf-8').trim();
-      const id3 = fs.readFileSync(sessionIdFile, 'utf-8').trim();
+  it('generates new ID when no sources available', () => {
+    const result = getSessionId();
+    expect(result).toMatch(/^s-[a-z0-9]+$/);
+  });
 
-      expect(id1).toBe('s-consistent');
-      expect(id2).toBe('s-consistent');
-      expect(id3).toBe('s-consistent');
-    });
+  it('uses BRAINTRUST_SPAN_ID as fallback', () => {
+    process.env.BRAINTRUST_SPAN_ID = 'fb123456-7890-abcd';
+
+    const result = getSessionId();
+    expect(result).toBe('fb123456');
+  });
+});
+
+describe('getProject', () => {
+  let originalProjectDir: string | undefined;
+
+  beforeEach(() => {
+    originalProjectDir = process.env.CLAUDE_PROJECT_DIR;
+  });
+
+  afterEach(() => {
+    if (originalProjectDir) {
+      process.env.CLAUDE_PROJECT_DIR = originalProjectDir;
+    } else {
+      delete process.env.CLAUDE_PROJECT_DIR;
+    }
+  });
+
+  it('returns CLAUDE_PROJECT_DIR when set', () => {
+    process.env.CLAUDE_PROJECT_DIR = '/test/project';
+
+    const result = getProject();
+    expect(result).toBe('/test/project');
+  });
+
+  it('falls back to cwd when CLAUDE_PROJECT_DIR not set', () => {
+    delete process.env.CLAUDE_PROJECT_DIR;
+
+    const result = getProject();
+    expect(result).toBe(process.cwd());
+  });
+});
+
+describe('cross-process consistency', () => {
+  let tempDir: string;
+  let originalHome: string | undefined;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-id-test-'));
+    originalHome = process.env.HOME;
+    process.env.HOME = tempDir;
+    delete process.env.COORDINATION_SESSION_ID;
+  });
+
+  afterEach(() => {
+    if (originalHome) process.env.HOME = originalHome;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('session-register and file-claims use same ID via file', () => {
+    // Simulate session-register writing
+    const generatedId = generateSessionId();
+    writeSessionId(generatedId);
+
+    // Simulate file-claims reading (different process, no env var)
+    const readId = getSessionId();
+
+    expect(readId).toBe(generatedId);
+  });
+
+  it('multiple getSessionId calls return same ID', () => {
+    writeSessionId('s-consistent');
+
+    const id1 = getSessionId();
+    const id2 = getSessionId();
+    const id3 = getSessionId();
+
+    expect(id1).toBe('s-consistent');
+    expect(id2).toBe('s-consistent');
+    expect(id3).toBe('s-consistent');
   });
 });

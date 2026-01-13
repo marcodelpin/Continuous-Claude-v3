@@ -1,6 +1,5 @@
 // src/session-register.ts
-import { readFileSync, writeFileSync, mkdirSync } from "fs";
-import { join as join2 } from "path";
+import { readFileSync as readFileSync2 } from "fs";
 
 // src/shared/db-utils-pg.ts
 import { spawnSync } from "child_process";
@@ -188,42 +187,55 @@ asyncio.run(main())
   }
 }
 
-// src/session-register.ts
-function getSessionIdFile() {
+// src/shared/session-id.ts
+import { existsSync as existsSync2, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { join as join2 } from "path";
+var SESSION_ID_FILENAME = ".coordination-session-id";
+function getSessionIdFile(options = {}) {
   const claudeDir = join2(process.env.HOME || "/tmp", ".claude");
-  try {
-    mkdirSync(claudeDir, { recursive: true });
-  } catch {
+  if (options.createDir) {
+    try {
+      mkdirSync(claudeDir, { recursive: true });
+    } catch {
+    }
   }
-  return join2(claudeDir, ".coordination-session-id");
+  return join2(claudeDir, SESSION_ID_FILENAME);
 }
-function getSessionId() {
+function generateSessionId() {
   const spanId = process.env.BRAINTRUST_SPAN_ID;
   if (spanId) {
     return spanId.slice(0, 8);
   }
   return `s-${Date.now().toString(36)}`;
 }
+function writeSessionId(sessionId) {
+  try {
+    const filePath = getSessionIdFile({ createDir: true });
+    writeFileSync(filePath, sessionId, "utf-8");
+    return true;
+  } catch {
+    return false;
+  }
+}
 function getProject() {
   return process.env.CLAUDE_PROJECT_DIR || process.cwd();
 }
+
+// src/session-register.ts
 function main() {
   let input;
   try {
-    const stdinContent = readFileSync(0, "utf-8");
+    const stdinContent = readFileSync2(0, "utf-8");
     input = JSON.parse(stdinContent);
   } catch {
     console.log(JSON.stringify({ result: "continue" }));
     return;
   }
-  const sessionId = getSessionId();
+  const sessionId = generateSessionId();
   const project = getProject();
   const projectName = project.split("/").pop() || "unknown";
   process.env.COORDINATION_SESSION_ID = sessionId;
-  try {
-    writeFileSync(getSessionIdFile(), sessionId, "utf-8");
-  } catch {
-  }
+  writeSessionId(sessionId);
   const registerResult = registerSession(sessionId, project, "");
   const sessionsResult = getActiveSessions(project);
   const otherSessions = sessionsResult.sessions.filter((s) => s.id !== sessionId);
