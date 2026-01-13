@@ -1,5 +1,6 @@
 // src/file-claims.ts
-import { readFileSync } from "fs";
+import { readFileSync, existsSync as existsSync2 } from "fs";
+import { join as join2 } from "path";
 
 // src/shared/db-utils-pg.ts
 import { spawnSync } from "child_process";
@@ -161,8 +162,22 @@ asyncio.run(main())
 }
 
 // src/file-claims.ts
+function getSessionIdFile() {
+  return join2(process.env.HOME || "/tmp", ".claude", ".coordination-session-id");
+}
 function getSessionId() {
-  return process.env.COORDINATION_SESSION_ID || process.env.BRAINTRUST_SPAN_ID?.slice(0, 8) || `s-${Date.now().toString(36)}`;
+  if (process.env.COORDINATION_SESSION_ID) {
+    return process.env.COORDINATION_SESSION_ID;
+  }
+  const sessionFile = getSessionIdFile();
+  if (existsSync2(sessionFile)) {
+    try {
+      const id = readFileSync(sessionFile, "utf-8").trim();
+      if (id) return id;
+    } catch {
+    }
+  }
+  return process.env.BRAINTRUST_SPAN_ID?.slice(0, 8) || `s-${Date.now().toString(36)}`;
 }
 function getProject() {
   return process.env.CLAUDE_PROJECT_DIR || process.cwd();
