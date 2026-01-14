@@ -1,5 +1,5 @@
 // src/file-claims.ts
-import { readFileSync } from "fs";
+import { readFileSync as readFileSync2 } from "fs";
 
 // src/shared/db-utils-pg.ts
 import { spawnSync } from "child_process";
@@ -160,17 +160,58 @@ asyncio.run(main())
   return { success: result.success && result.stdout === "ok" };
 }
 
-// src/file-claims.ts
-function getSessionId() {
-  return process.env.COORDINATION_SESSION_ID || process.env.BRAINTRUST_SPAN_ID?.slice(0, 8) || `s-${Date.now().toString(36)}`;
+// src/shared/session-id.ts
+import { mkdirSync, readFileSync, writeFileSync } from "fs";
+import { join as join2 } from "path";
+var SESSION_ID_FILENAME = ".coordination-session-id";
+function getSessionIdFile(options = {}) {
+  const claudeDir = join2(process.env.HOME || "/tmp", ".claude");
+  if (options.createDir) {
+    try {
+      mkdirSync(claudeDir, { recursive: true, mode: 448 });
+    } catch {
+    }
+  }
+  return join2(claudeDir, SESSION_ID_FILENAME);
+}
+function generateSessionId() {
+  const spanId = process.env.BRAINTRUST_SPAN_ID;
+  if (spanId) {
+    return spanId.slice(0, 8);
+  }
+  return `s-${Date.now().toString(36)}`;
+}
+function readSessionId() {
+  try {
+    const sessionFile = getSessionIdFile();
+    const id = readFileSync(sessionFile, "utf-8").trim();
+    return id || null;
+  } catch {
+    return null;
+  }
+}
+function getSessionId(options = {}) {
+  if (process.env.COORDINATION_SESSION_ID) {
+    return process.env.COORDINATION_SESSION_ID;
+  }
+  const fileId = readSessionId();
+  if (fileId) {
+    return fileId;
+  }
+  if (options.debug) {
+    console.error("[session-id] WARNING: No persisted session ID found, generating new one");
+  }
+  return generateSessionId();
 }
 function getProject() {
   return process.env.CLAUDE_PROJECT_DIR || process.cwd();
 }
+
+// src/file-claims.ts
 function main() {
   let input;
   try {
-    const stdinContent = readFileSync(0, "utf-8");
+    const stdinContent = readFileSync2(0, "utf-8");
     input = JSON.parse(stdinContent);
   } catch {
     console.log(JSON.stringify({ result: "continue" }));
