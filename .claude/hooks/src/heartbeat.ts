@@ -67,6 +67,7 @@ export function main(): void {
   const pythonCode = `
 import asyncpg
 import os
+import sys
 
 session_id = sys.argv[1]
 project = sys.argv[2]
