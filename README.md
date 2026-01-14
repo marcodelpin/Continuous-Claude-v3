@@ -976,6 +976,101 @@ This will:
 | Scripts | ~/.claude/scripts/ |
 | PostgreSQL | Docker container |
 
+### Installation Mode: Copy vs Symlink
+
+The wizard offers two installation modes:
+
+| Mode | How It Works | Best For |
+|------|--------------|----------|
+| **Copy** (default) | Copies files from repo to `~/.claude/` | End users, stable setup |
+| **Symlink** | Creates symlinks to repo files | Contributors, development |
+
+#### Copy Mode (Default)
+
+Files are copied from `continuous-claude/.claude/` to `~/.claude/`. Changes you make in `~/.claude/` are **local only** and will be overwritten on next update.
+
+```text
+continuous-claude/.claude/  ──COPY──>  ~/.claude/
+     (source)                          (user config)
+```
+
+**Pros:** Stable, isolated from repo changes
+**Cons:** Local changes lost on update, manual sync needed
+
+#### Symlink Mode (Recommended for Contributors)
+
+Creates symlinks so `~/.claude/` points directly to repo files. Changes in either location affect the same files.
+
+```text
+~/.claude/rules  ──SYMLINK──>  continuous-claude/.claude/rules
+~/.claude/skills ──SYMLINK──>  continuous-claude/.claude/skills
+~/.claude/hooks  ──SYMLINK──>  continuous-claude/.claude/hooks
+~/.claude/agents ──SYMLINK──>  continuous-claude/.claude/agents
+```
+
+**Pros:**
+- Changes auto-sync to repo (can `git commit` improvements)
+- No re-installation needed after `git pull`
+- Contribute back easily
+
+**Cons:**
+- Breaking changes in repo affect your setup immediately
+- Need to manage git workflow
+
+#### Switching to Symlink Mode
+
+If you installed with copy mode and want to switch:
+
+```bash
+# Backup current config
+mkdir -p ~/.claude/backups/$(date +%Y%m%d)
+cp -r ~/.claude/{rules,skills,hooks,agents} ~/.claude/backups/$(date +%Y%m%d)/
+
+# Verify backup succeeded before proceeding
+ls -la ~/.claude/backups/$(date +%Y%m%d)/
+
+# Remove copies (only after verifying backup above)
+rm -rf ~/.claude/{rules,skills,hooks,agents}
+
+# Create symlinks (adjust path to your repo location)
+REPO="$HOME/continuous-claude"  # or wherever you cloned
+ln -s "$REPO/.claude/rules" ~/.claude/rules
+ln -s "$REPO/.claude/skills" ~/.claude/skills
+ln -s "$REPO/.claude/hooks" ~/.claude/hooks
+ln -s "$REPO/.claude/agents" ~/.claude/agents
+
+# Verify
+ls -la ~/.claude | grep -E "rules|skills|hooks|agents"
+```
+
+**Windows users:** Use PowerShell (as Administrator or with Developer Mode enabled):
+
+```powershell
+# Enable Developer Mode first (Settings → Privacy & security → For developers)
+# Or run PowerShell as Administrator
+
+# Backup current config
+$BackupDir = "$HOME\.claude\backups\$(Get-Date -Format 'yyyyMMdd')"
+New-Item -ItemType Directory -Path $BackupDir -Force
+Copy-Item -Recurse "$HOME\.claude\rules","$HOME\.claude\skills","$HOME\.claude\hooks","$HOME\.claude\agents" $BackupDir
+
+# Verify backup succeeded before proceeding
+Get-ChildItem $BackupDir
+
+# Remove copies (only after verifying backup above)
+Remove-Item -Recurse "$HOME\.claude\rules","$HOME\.claude\skills","$HOME\.claude\hooks","$HOME\.claude\agents"
+
+# Create symlinks (adjust path to your repo location)
+$REPO = "$HOME\continuous-claude"  # or wherever you cloned
+New-Item -ItemType SymbolicLink -Path "$HOME\.claude\rules" -Target "$REPO\.claude\rules"
+New-Item -ItemType SymbolicLink -Path "$HOME\.claude\skills" -Target "$REPO\.claude\skills"
+New-Item -ItemType SymbolicLink -Path "$HOME\.claude\hooks" -Target "$REPO\.claude\hooks"
+New-Item -ItemType SymbolicLink -Path "$HOME\.claude\agents" -Target "$REPO\.claude\agents"
+
+# Verify
+Get-ChildItem "$HOME\.claude" | Where-Object { $_.LinkType -eq "SymbolicLink" }
+```
+
 ### For Brownfield Projects
 
 After installation, start Claude and run:
