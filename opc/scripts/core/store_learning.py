@@ -131,6 +131,7 @@ async def store_learning_v2(
                 top_match = existing[0]
                 similarity = top_match.get("similarity", 0)
                 if similarity >= DEDUP_THRESHOLD:
+                    await embedder.aclose()
                     await memory.close()
                     return {
                         "success": True,
@@ -165,6 +166,7 @@ async def store_learning_v2(
             embedding=embedding,
         )
 
+        await embedder.aclose()
         await memory.close()
 
         return {
@@ -259,6 +261,7 @@ async def store_learning(
             embedding=embedding,
         )
 
+        await embedder.aclose()
         await memory.close()
 
         return {
