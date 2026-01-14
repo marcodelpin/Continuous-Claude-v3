@@ -80,7 +80,7 @@ ${pythonCode}
 }
 
 // src/heartbeat.ts
-function getSessionId() {
+function getCoordinationSessionId() {
   try {
     const claudeDir = join2(process.env.HOME || "/tmp", ".claude");
     const sessionFile = join2(claudeDir, ".coordination-session-id");
@@ -97,7 +97,7 @@ function main() {
     console.log(JSON.stringify({ result: "continue" }));
     return;
   }
-  const sessionId = getSessionId();
+  const sessionId = getCoordinationSessionId();
   const project = getProject();
   if (!sessionId) {
     console.log(JSON.stringify({ result: "continue" }));
@@ -127,7 +127,10 @@ async def main():
 
 asyncio.run(main())
 `;
-  runPgQuery(pythonCode, [sessionId, project]);
+  const result = runPgQuery(pythonCode, [sessionId, project]);
+  if (!result.success) {
+    console.error(`[heartbeat] Update failed: ${result.stderr || result.stdout}`);
+  }
   const output = {
     result: "continue"
   };

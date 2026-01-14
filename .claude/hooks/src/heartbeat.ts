@@ -14,11 +14,12 @@ import { runPgQuery } from './shared/db-utils-pg.js';
 import type { HookOutput } from './shared/types.js';
 
 /**
- * Get the session ID from file or environment.
+ * Get the coordination session ID from file or environment.
+ * Different from resource-reader's getSessionId() which uses CLAUDE_SESSION_ID.
  *
- * @returns Session ID or empty string if not found
+ * @returns Coordination session ID or empty string if not found
  */
-function getSessionId(): string {
+function getCoordinationSessionId(): string {
   // Try file first (persisted by session-register)
   try {
     const claudeDir = join(process.env.HOME || '/tmp', '.claude');
@@ -52,7 +53,7 @@ export function main(): void {
     return;
   }
 
-  const sessionId = getSessionId();
+  const sessionId = getCoordinationSessionId();
   const project = getProject();
 
   // Skip if no session ID
@@ -87,7 +88,10 @@ async def main():
 asyncio.run(main())
 `;
 
-  runPgQuery(pythonCode, [sessionId, project]);
+  const result = runPgQuery(pythonCode, [sessionId, project]);
+  if (!result.success) {
+    console.error(`[heartbeat] Update failed: ${result.stderr || result.stdout}`);
+  }
 
   const output: HookOutput = {
     result: 'continue',
