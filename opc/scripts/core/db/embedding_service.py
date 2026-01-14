@@ -442,19 +442,21 @@ class OllamaEmbeddingProvider(EmbeddingProvider):
         self,
         model: str | None = None,
         host: str | None = None,
+        verify_ssl: bool | None = None,
     ):
         """Initialize Ollama embedding provider.
 
         Args:
             model: Model name (default from OLLAMA_EMBED_MODEL env or nomic-embed-text)
             host: Ollama server URL (default from OLLAMA_HOST env or localhost:11434)
+            verify_ssl: SSL certificate verification (default from OLLAMA_VERIFY_SSL env or True)
         """
-        import os
-        import httpx
-
         self.model = model or os.getenv("OLLAMA_EMBED_MODEL", self.DEFAULT_MODEL)
         self.host = host or os.getenv("OLLAMA_HOST", self.DEFAULT_HOST)
-        self._client = httpx.AsyncClient(timeout=30.0, verify=False)
+        # SSL verification: default True for security, can be disabled via env or param
+        if verify_ssl is None:
+            verify_ssl = os.getenv("OLLAMA_VERIFY_SSL", "true").lower() != "false"
+        self._client = httpx.AsyncClient(timeout=30.0, verify=verify_ssl)
         self._dimension = self.MODELS.get(self.model, 768)
 
     async def embed(self, text: str) -> list[float]:
@@ -462,7 +464,10 @@ class OllamaEmbeddingProvider(EmbeddingProvider):
         url = f"{self.host.rstrip('/')}/api/embeddings"
         response = await self._client.post(url, json={"model": self.model, "prompt": text})
         response.raise_for_status()
-        return response.json()["embedding"]
+        data = response.json()
+        if "embedding" not in data:
+            raise EmbeddingError(f"Ollama response missing 'embedding' field: {data}")
+        return data["embedding"]
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         """Generate embeddings for multiple texts (sequential for Ollama)."""
@@ -471,6 +476,10 @@ class OllamaEmbeddingProvider(EmbeddingProvider):
             emb = await self.embed(text)
             results.append(emb)
         return results
+
+    async def aclose(self) -> None:
+        """Close the HTTP client."""
+        await self._client.aclose()
 
     @property
     def dimension(self) -> int:
