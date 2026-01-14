@@ -9,22 +9,61 @@
  * Part of the coordination layer architecture (Phase 1).
  */
 
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
+import { join } from 'path';
 import { checkFileClaim, claimFile } from './shared/db-utils-pg.js';
 import type { PreToolUseInput, HookOutput } from './shared/types.js';
 
-// Get session ID from environment (set by session-register hook)
+/**
+ * Returns the path to the session ID persistence file.
+ * Uses per-project file to support concurrent sessions in different projects.
+ *
+ * @returns Path to .claude/.coordination-session-id in project dir
+ */
+function getSessionIdFile(): string {
+  const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  return join(projectDir, '.claude', '.coordination-session-id');
+}
+
+/**
+ * Retrieves the session ID for coordination, checking multiple sources.
+ * Priority: env var > file > BRAINTRUST_SPAN_ID > generated.
+ *
+ * @returns Session identifier string (e.g., "s-m1abc23")
+ */
 function getSessionId(): string {
-  return process.env.COORDINATION_SESSION_ID ||
-         process.env.BRAINTRUST_SPAN_ID?.slice(0, 8) ||
+  // First try environment (same process)
+  if (process.env.COORDINATION_SESSION_ID) {
+    return process.env.COORDINATION_SESSION_ID;
+  }
+
+  // Try reading from file (cross-process persistence)
+  const sessionFile = getSessionIdFile();
+  if (existsSync(sessionFile)) {
+    try {
+      const id = readFileSync(sessionFile, 'utf-8').trim();
+      if (id) return id;
+    } catch { /* ignore read errors */ }
+  }
+
+  // Fallback to Braintrust span ID or generate new
+  return process.env.BRAINTRUST_SPAN_ID?.slice(0, 8) ||
          `s-${Date.now().toString(36)}`;
 }
 
-// Get project from environment
+/**
+ * Returns the current project directory path.
+ *
+ * @returns CLAUDE_PROJECT_DIR env var or current working directory
+ */
 function getProject(): string {
   return process.env.CLAUDE_PROJECT_DIR || process.cwd();
 }
 
+/**
+ * Main entry point for the PreToolUse:Edit hook.
+ * Checks for file conflicts and claims files for the current session.
+ */
 export function main(): void {
   // Read hook input from stdin
   let input: PreToolUseInput;

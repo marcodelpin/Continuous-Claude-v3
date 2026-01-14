@@ -81,9 +81,9 @@ ${pythonCode}
 
 // src/heartbeat.ts
 function getCoordinationSessionId() {
+  const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
   try {
-    const claudeDir = join2(process.env.HOME || "/tmp", ".claude");
-    const sessionFile = join2(claudeDir, ".coordination-session-id");
+    const sessionFile = join2(projectDir, ".claude", ".coordination-session-id");
     return readFileSync(sessionFile, "utf-8").trim();
   } catch {
     return process.env.COORDINATION_SESSION_ID || process.env.BRAINTRUST_SPAN_ID?.slice(0, 8) || "";

@@ -9,27 +9,53 @@
  * Part of the coordination layer architecture (Phase 1).
  */
 
-import { readFileSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { join } from 'path';
 import { registerSession, getActiveSessions } from './shared/db-utils-pg.js';
 import type { SessionStartInput, HookOutput } from './shared/types.js';
 
-// Generate a short session ID from environment or random
+/**
+ * Returns the path to the session ID persistence file.
+ * Uses per-project file to avoid collision between concurrent sessions.
+ *
+ * @returns Path to .claude/.coordination-session-id in project dir
+ */
+function getSessionIdFile(): string {
+  const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  const claudeDir = join(projectDir, '.claude');
+  try {
+    mkdirSync(claudeDir, { recursive: true });
+  } catch { /* ignore */ }
+  return join(claudeDir, '.coordination-session-id');
+}
+
+/**
+ * Generates or retrieves a short session ID for coordination.
+ * Priority: BRAINTRUST_SPAN_ID (first 8 chars) > timestamp-based ID.
+ *
+ * @returns 8-character session identifier (e.g., "s-m1abc23")
+ */
 function getSessionId(): string {
-  // Use Braintrust span ID if available, otherwise generate
   const spanId = process.env.BRAINTRUST_SPAN_ID;
   if (spanId) {
     return spanId.slice(0, 8);
   }
-
-  // Fallback to timestamp-based ID
   return `s-${Date.now().toString(36)}`;
 }
 
-// Get project from environment
+/**
+ * Returns the current project directory path.
+ *
+ * @returns CLAUDE_PROJECT_DIR env var or current working directory
+ */
 function getProject(): string {
   return process.env.CLAUDE_PROJECT_DIR || process.cwd();
 }
 
+/**
+ * Main entry point for the SessionStart hook.
+ * Registers the session, persists the ID to file, and injects awareness message.
+ */
 export function main(): void {
   // Read hook input from stdin
   let input: SessionStartInput;
@@ -46,8 +72,11 @@ export function main(): void {
   const project = getProject();
   const projectName = project.split('/').pop() || 'unknown';
 
-  // Store session ID in environment for other hooks
+  // Store session ID in environment and file for other hooks
   process.env.COORDINATION_SESSION_ID = sessionId;
+  try {
+    writeFileSync(getSessionIdFile(), sessionId, 'utf-8');
+  } catch { /* ignore write errors */ }
 
   // Register session in PostgreSQL
   const registerResult = registerSession(sessionId, project, '');

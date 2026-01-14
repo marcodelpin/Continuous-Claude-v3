@@ -16,14 +16,15 @@ import type { HookOutput } from './shared/types.js';
 /**
  * Get the coordination session ID from file or environment.
  * Different from resource-reader's getSessionId() which uses CLAUDE_SESSION_ID.
+ * Reads from per-project file to support concurrent sessions.
  *
  * @returns Coordination session ID or empty string if not found
  */
 function getCoordinationSessionId(): string {
-  // Try file first (persisted by session-register)
+  // Try per-project file first (persisted by session-register)
+  const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
   try {
-    const claudeDir = join(process.env.HOME || '/tmp', '.claude');
-    const sessionFile = join(claudeDir, '.coordination-session-id');
+    const sessionFile = join(projectDir, '.claude', '.coordination-session-id');
     return readFileSync(sessionFile, 'utf-8').trim();
   } catch {
     // Fall back to environment variables

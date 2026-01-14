@@ -1,5 +1,6 @@
 // src/session-register.ts
-import { readFileSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync } from "fs";
+import { join as join2 } from "path";
 
 // src/shared/db-utils-pg.ts
 import { spawnSync } from "child_process";
@@ -189,6 +190,15 @@ asyncio.run(main())
 }
 
 // src/session-register.ts
+function getSessionIdFile() {
+  const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  const claudeDir = join2(projectDir, ".claude");
+  try {
+    mkdirSync(claudeDir, { recursive: true });
+  } catch {
+  }
+  return join2(claudeDir, ".coordination-session-id");
+}
 function getSessionId() {
   const spanId = process.env.BRAINTRUST_SPAN_ID;
   if (spanId) {
@@ -212,6 +222,10 @@ function main() {
   const project = getProject();
   const projectName = project.split("/").pop() || "unknown";
   process.env.COORDINATION_SESSION_ID = sessionId;
+  try {
+    writeFileSync(getSessionIdFile(), sessionId, "utf-8");
+  } catch {
+  }
   const registerResult = registerSession(sessionId, project, "");
   const sessionsResult = getActiveSessions(project);
   const otherSessions = sessionsResult.sessions.filter((s) => s.id !== sessionId);
