@@ -1,0 +1,22 @@
+# Allow dev passwords in fallback connection strings
+# These are local development defaults, not production secrets
+
+# Connection strings with localhost defaults (dev fallback)
+.claude/hooks/dist/heartbeat.mjs:connection-string-with-password:42
+.claude/hooks/dist/arch-context-inject.mjs:connection-string-with-password
+.claude/hooks/dist/edit-context-inject.mjs:connection-string-with-password
+.claude/hooks/dist/file-claims.mjs:connection-string-with-password
+.claude/hooks/dist/impact-refactor.mjs:connection-string-with-password
+.claude/hooks/dist/import-validator.mjs:connection-string-with-password
+.claude/hooks/dist/post-edit-diagnostics.mjs:connection-string-with-password
+.claude/hooks/dist/post-edit-notify.mjs:connection-string-with-password
+.claude/hooks/dist/session-register.mjs:connection-string-with-password
+.claude/hooks/dist/session-start-dead-code.mjs:connection-string-with-password
+.claude/hooks/dist/session-start-tldr-cache.mjs:connection-string-with-password
+.claude/hooks/dist/signature-helper.mjs:connection-string-with-password
+.claude/hooks/dist/smart-search-router.mjs:connection-string-with-password
+.claude/hooks/dist/tldr-context-inject.mjs:connection-string-with-password
+.claude/hooks/dist/tldr-read-enforcer.mjs:connection-string-with-password
+.claude/hooks/src/shared/db-utils-pg.ts:connection-string-with-password
+.claude/hooks/dist/heartbeat.mjs:connection-string-with-password:112
+.claude/hooks/src/heartbeat.ts:connection-string-with-password:71

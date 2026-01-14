@@ -102,11 +102,12 @@ async def main():
             )
         ''')
 
-        # Upsert session
+        # Upsert session (project updated on conflict to handle session ID reuse)
         await conn.execute('''
             INSERT INTO sessions (id, project, working_on, started_at, last_heartbeat)
             VALUES ($1, $2, $3, NOW(), NOW())
             ON CONFLICT (id) DO UPDATE SET
+                project = EXCLUDED.project,
                 working_on = EXCLUDED.working_on,
                 last_heartbeat = NOW()
         ''', session_id, project, working_on)

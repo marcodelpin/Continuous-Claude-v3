@@ -1,12 +1,48 @@
+// src/heartbeat.ts
+import { readFileSync } from "fs";
+import { join as join2 } from "path";
+
 // src/shared/db-utils-pg.ts
 import { spawnSync } from "child_process";
+
+// src/shared/opc-path.ts
+import { existsSync } from "fs";
 import { join } from "path";
+function getOpcDir() {
+  const envOpcDir = process.env.CLAUDE_OPC_DIR;
+  if (envOpcDir && existsSync(envOpcDir)) {
+    return envOpcDir;
+  }
+  const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  const localOpc = join(projectDir, "opc");
+  if (existsSync(localOpc)) {
+    return localOpc;
+  }
+  const homeDir = process.env.HOME || process.env.USERPROFILE || "";
+  if (homeDir) {
+    const globalClaude = join(homeDir, ".claude");
+    const globalScripts = join(globalClaude, "scripts", "core");
+    if (existsSync(globalScripts)) {
+      return globalClaude;
+    }
+  }
+  return null;
+}
+function requireOpcDir() {
+  const opcDir = getOpcDir();
+  if (!opcDir) {
+    console.log(JSON.stringify({ result: "continue" }));
+    process.exit(0);
+  }
+  return opcDir;
+}
+
+// src/shared/db-utils-pg.ts
 function getPgConnectionString() {
-  return process.env.OPC_POSTGRES_URL || "postgresql://opc:opc_dev_password@localhost:5432/opc";
+  return process.env.OPC_POSTGRES_URL || process.env.DATABASE_URL || "postgresql://claude:claude_dev@localhost:5432/continuous_claude";
 }
 function runPgQuery(pythonCode, args = []) {
-  const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
-  const opcDir = join(projectDir, "opc");
+  const opcDir = requireOpcDir();
   const wrappedCode = `
 import sys
 import os
@@ -45,7 +81,13 @@ ${pythonCode}
 
 // src/heartbeat.ts
 function getSessionId() {
-  return process.env.COORDINATION_SESSION_ID || process.env.BRAINTRUST_SPAN_ID?.slice(0, 8) || "";
+  try {
+    const claudeDir = join2(process.env.HOME || "/tmp", ".claude");
+    const sessionFile = join2(claudeDir, ".coordination-session-id");
+    return readFileSync(sessionFile, "utf-8").trim();
+  } catch {
+    return process.env.COORDINATION_SESSION_ID || process.env.BRAINTRUST_SPAN_ID?.slice(0, 8) || "";
+  }
 }
 function getProject() {
   return process.env.CLAUDE_PROJECT_DIR || process.cwd();
@@ -67,14 +109,17 @@ import os
 
 session_id = sys.argv[1]
 project = sys.argv[2]
-pg_url = os.environ.get('CONTINUOUS_CLAUDE_DB_URL', 'postgresql://claude:claude_dev@localhost:5432/continuous_claude')
+pg_url = os.environ.get('OPC_POSTGRES_URL', 'postgresql://claude:claude_dev@localhost:5432/continuous_claude')
 
 async def main():
     conn = await asyncpg.connect(pg_url)
     try:
+        # Update heartbeat and project (handles session ID reuse across projects)
         await conn.execute('''
-            UPDATE sessions SET last_heartbeat = NOW()
-            WHERE id = $1 AND project = $2
+            UPDATE sessions SET
+                last_heartbeat = NOW(),
+                project = $2
+            WHERE id = $1
         ''', session_id, project)
         print('ok')
     finally:
@@ -83,7 +128,10 @@ async def main():
 asyncio.run(main())
 `;
   runPgQuery(pythonCode, [sessionId, project]);
-  console.log(JSON.stringify({ result: "continue" }));
+  const output = {
+    result: "continue"
+  };
+  console.log(JSON.stringify(output));
 }
 main();
 export {
