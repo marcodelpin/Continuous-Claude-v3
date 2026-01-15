@@ -116,11 +116,11 @@ Each review JSON contains these key fields for comparison:
 
 ```bash
 # Count actionable comments in a review
-jq '.[].body' origin-pr-76.json | grep -o "Actionable comments posted: [0-9]*"
+jq -r '.[].body' origin-pr-76.json | grep -o "Actionable comments posted: [0-9]*"
 
 # Get commit SHA
-jq '.[].commit_id' origin-pr-76.json
+jq -r '.[].commit_id' origin-pr-76.json
 
 # Get files reviewed
-jq '.[].body' origin-pr-76.json | grep -o "Files selected for processing ([0-9]*)"
+jq -r '.[].body' origin-pr-76.json | grep -o "Files selected for processing ([0-9]*)"
 ```

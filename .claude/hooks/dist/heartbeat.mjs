@@ -80,7 +80,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join as join2 } from "path";
 var SESSION_ID_FILENAME = ".coordination-session-id";
 function getSessionIdFile(options = {}) {
-  const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  const projectDir = getProject();
   const claudeDir = join2(projectDir, ".claude");
   if (options.createDir) {
     try {

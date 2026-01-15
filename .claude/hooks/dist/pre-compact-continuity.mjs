@@ -282,6 +282,9 @@ function storeCheckpoint(checkpoint, sessionId, agentId) {
     const match = result.stdout.match(/Created checkpoint: ([a-f0-9-]+)/);
     return match ? match[1] : null;
   }
+  if (result.stderr) {
+    console.error(`[checkpoint] storeCheckpoint failed: ${result.stderr}`);
+  }
   return null;
 }
 
@@ -362,13 +365,15 @@ function getEditedFiles(projectDir, sessionId) {
     return [];
   }
   const content = fs2.readFileSync(editedFilesPath, "utf-8");
+  const normalizedProjectDir = projectDir.replace(/\\/g, "/");
   return [...new Set(
     content.split("\n").filter((line) => line.trim()).map((line) => {
       const firstColon = line.indexOf(":");
       const lastColon = line.lastIndexOf(":");
       if (firstColon === -1 || lastColon === firstColon) return "";
       const filepath = line.slice(firstColon + 1, lastColon);
-      return filepath.replace(projectDir + "/", "").replace(projectDir + "\\", "") || "";
+      const normalized = filepath.replace(/\\/g, "/");
+      return normalized.startsWith(normalizedProjectDir + "/") ? normalized.slice(normalizedProjectDir.length + 1) : normalized;
     }).filter((f) => f)
   )];
 }

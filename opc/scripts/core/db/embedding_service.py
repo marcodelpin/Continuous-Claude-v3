@@ -505,11 +505,11 @@ class OllamaEmbeddingProvider(EmbeddingProvider):
             except httpx.RequestError as e:
                 last_error = e
                 if attempt < self.max_retries - 1:
-                    await asyncio.sleep(self.RETRY_DELAY * (2 ** attempt))
+                    await asyncio.sleep(self.RETRY_DELAY * (attempt + 1))
             except httpx.HTTPStatusError as e:
                 last_error = e
                 if attempt < self.max_retries - 1:
-                    await asyncio.sleep(self.RETRY_DELAY * (2 ** attempt))
+                    await asyncio.sleep(self.RETRY_DELAY * (attempt + 1))
             except (KeyError, TypeError, ValueError) as e:
                 # JSON parsing or data structure errors - don't retry
                 raise EmbeddingError(f"Invalid Ollama response: {e}") from e
@@ -529,6 +529,14 @@ class OllamaEmbeddingProvider(EmbeddingProvider):
     async def aclose(self) -> None:
         """Close the HTTP client."""
         await self._client.aclose()
+
+    async def __aenter__(self) -> "OllamaEmbeddingProvider":
+        """Enter async context manager."""
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Exit async context manager."""
+        await self.aclose()
 
     @property
     def dimension(self) -> int:

@@ -262,6 +262,11 @@ export function storeCheckpoint(
     return match ? match[1] : null;
   }
 
+  // Debug logging on failure
+  if (result.stderr) {
+    console.error(`[checkpoint] storeCheckpoint failed: ${result.stderr}`);
+  }
+
   return null;
 }
 

@@ -108,6 +108,24 @@ class MemoryServicePG:
         # Pool is shared, don't close it here
         pass
 
+    @staticmethod
+    def _safe_json_loads(value: str | None, default: Any) -> Any:
+        """Safely parse JSON with fallback to default.
+
+        Args:
+            value: JSON string or None
+            default: Value to return if parsing fails
+
+        Returns:
+            Parsed JSON or default value
+        """
+        if not value:
+            return default
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return default
+
     # ==================== Core Memory ====================
 
     async def set_core(self, key: str, value: str) -> None:
@@ -1255,8 +1273,8 @@ class MemoryServicePG:
                 "session_id": row["session_id"],
                 "phase": row["phase"],
                 "context_usage": row["context_usage"],
-                "files_modified": json.loads(row["files_modified"]) if row["files_modified"] else [],
-                "unknowns": json.loads(row["unknowns"]) if row["unknowns"] else [],
+                "files_modified": self._safe_json_loads(row["files_modified"], []),
+                "unknowns": self._safe_json_loads(row["unknowns"], []),
                 "handoff_path": row["handoff_path"],
                 "created_at": row["created_at"],
             }
@@ -1315,8 +1333,8 @@ class MemoryServicePG:
                     "session_id": row["session_id"],
                     "phase": row["phase"],
                     "context_usage": row["context_usage"],
-                    "files_modified": json.loads(row["files_modified"]) if row["files_modified"] else [],
-                    "unknowns": json.loads(row["unknowns"]) if row["unknowns"] else [],
+                    "files_modified": self._safe_json_loads(row["files_modified"], []),
+                    "unknowns": self._safe_json_loads(row["unknowns"], []),
                     "handoff_path": row["handoff_path"],
                     "created_at": row["created_at"],
                 }
@@ -1636,7 +1654,7 @@ class MemoryServicePG:
         Returns:
             Number of agents killed
         """
-        async with get_connection() as conn:
+        async with get_transaction() as conn:
             result = await conn.execute(
                 """
                 UPDATE agents
@@ -2096,7 +2114,7 @@ class MemoryServicePG:
         Returns:
             Number of facts deleted
         """
-        async with get_connection() as conn:
+        async with get_transaction() as conn:
             result = await conn.execute(
                 """
                 DELETE FROM temporal_facts

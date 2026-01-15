@@ -27,7 +27,7 @@ Compare CodeRabbit (AI code review bot) output with alternative LLM analysis to 
 - **Total Reviews**: 69
 
 ### Key Fields Per Review
-```
+```text
 commit_id        - Exact SHA reviewed
 submitted_at     - ISO 8601 timestamp
 body             - Full markdown review with:
@@ -91,7 +91,7 @@ For LLM comparison, focus on these reviews (most feedback):
 4. **Report**: Summarize which reviewer provides better value
 
 ## File Structure
-```
+```text
 docs/coderabbit-reviews/
 ├── README.md           # Index and documentation
 ├── WORKPLAN.md         # This file

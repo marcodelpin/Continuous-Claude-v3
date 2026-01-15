@@ -29,7 +29,7 @@ const SESSION_ID_FILENAME = '.coordination-session-id';
  * @returns Path to <project>/.claude/.coordination-session-id
  */
 export function getSessionIdFile(options: { createDir?: boolean } = {}): string {
-  const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  const projectDir = getProject();
   const claudeDir = join(projectDir, '.claude');
 
   if (options.createDir) {
