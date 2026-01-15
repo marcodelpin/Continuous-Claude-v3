@@ -12,7 +12,7 @@ Compare CodeRabbit (AI code review bot) output with alternative LLM analysis to 
 
 | Phase | Status | Notes |
 |-------|--------|-------|
-| 1. Data Collection | ✅ Complete | 69 reviews from 28 PRs archived |
+| 1. Data Collection | ✅ Complete | 113 reviews from 37 PRs archived |
 | 2. Structure Documentation | ✅ Complete | README with field reference and extraction commands |
 | 3. High-Value Review Index | ✅ Complete | Top reviews tagged by category |
 | 4. Alternative LLM Analysis | ⏳ Pending | User to run comparison |
@@ -23,8 +23,8 @@ Compare CodeRabbit (AI code review bot) output with alternative LLM analysis to 
 ### Archive Contents
 - **Location**: `docs/coderabbit-reviews/`
 - **Format**: Raw GitHub API JSON responses
-- **Total PRs**: 28 (21 origin + 7 fork)
-- **Total Reviews**: 69
+- **Total PRs**: 37 (27 origin + 10 fork)
+- **Total Reviews**: 113
 
 ### Key Fields Per Review
 ```text

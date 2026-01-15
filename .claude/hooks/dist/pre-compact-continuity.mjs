@@ -368,10 +368,9 @@ function getEditedFiles(projectDir, sessionId) {
   const normalizedProjectDir = projectDir.replace(/\\/g, "/");
   return [...new Set(
     content.split("\n").filter((line) => line.trim()).map((line) => {
-      const firstColon = line.indexOf(":");
-      const lastColon = line.lastIndexOf(":");
-      if (firstColon === -1 || lastColon === firstColon) return "";
-      const filepath = line.slice(firstColon + 1, lastColon);
+      const parts = line.split(":");
+      if (parts.length < 3) return "";
+      const filepath = parts.slice(1, -1).join(":");
       const normalized = filepath.replace(/\\/g, "/");
       return normalized.startsWith(normalizedProjectDir + "/") ? normalized.slice(normalizedProjectDir.length + 1) : normalized;
     }).filter((f) => f)

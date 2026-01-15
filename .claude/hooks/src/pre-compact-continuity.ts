@@ -125,16 +125,20 @@ function getEditedFiles(projectDir: string, sessionId: string): string[] {
 
   const content = fs.readFileSync(editedFilesPath, 'utf-8');
   // Format: timestamp:filepath:repo per line
-  // Use indexOf/lastIndexOf to handle colons in filepath (e.g., Windows C:\...)
+  // Split by colon, handle Windows paths (C:\...) by taking middle segments
   const normalizedProjectDir = projectDir.replace(/\\/g, '/');
   return [...new Set(
     content.split('\n')
       .filter(line => line.trim())
       .map(line => {
-        const firstColon = line.indexOf(':');
-        const lastColon = line.lastIndexOf(':');
-        if (firstColon === -1 || lastColon === firstColon) return '';
-        const filepath = line.slice(firstColon + 1, lastColon);
+        const parts = line.split(':');
+        // Need at least 3 parts: timestamp, filepath, repo
+        // For Windows paths like C:\foo\bar.txt, parts could be:
+        // ['timestamp', 'C', '\foo\bar.txt', 'repo']
+        if (parts.length < 3) return '';
+        // First part is timestamp, last part is repo, middle is filepath
+        // Join middle parts with ':' to reconstruct Windows paths
+        const filepath = parts.slice(1, -1).join(':');
         // Normalize to forward slashes first, then remove prefix
         const normalized = filepath.replace(/\\/g, '/');
         return normalized.startsWith(normalizedProjectDir + '/')
