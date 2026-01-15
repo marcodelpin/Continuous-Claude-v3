@@ -82,7 +82,7 @@ async function main() {
       ? `thoughts/shared/handoffs/${sessionName}/${handoffFile}`
       : undefined;
 
-    await storeCheckpoint(
+    const checkpointId = await storeCheckpoint(
       {
         phase: 'pre-compact',
         contextUsage: 0.95,  // Compacting means we're near limit
@@ -92,9 +92,10 @@ async function main() {
       input.session_id
     );
 
+    const checkpointStatus = checkpointId ? '+ checkpoint saved' : '(checkpoint failed)';
     const message = handoffFile
-      ? `[PreCompact:auto] Created YAML handoff: thoughts/shared/handoffs/${sessionName}/${handoffFile} + checkpoint saved`
-      : `[PreCompact:auto] Session summary auto-appended to ${mostRecent} + checkpoint saved`;
+      ? `[PreCompact:auto] Created YAML handoff: thoughts/shared/handoffs/${sessionName}/${handoffFile} ${checkpointStatus}`
+      : `[PreCompact:auto] Session summary auto-appended to ${mostRecent} ${checkpointStatus}`;
 
     const output: HookOutput = {
       continue: true,

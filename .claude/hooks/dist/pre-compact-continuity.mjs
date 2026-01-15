@@ -329,7 +329,7 @@ async function main() {
     }
     const editedFiles = getEditedFiles(projectDir, input.session_id);
     const handoffPath = handoffFile ? `thoughts/shared/handoffs/${sessionName}/${handoffFile}` : void 0;
-    await storeCheckpoint(
+    const checkpointId = await storeCheckpoint(
       {
         phase: "pre-compact",
         contextUsage: 0.95,
@@ -339,7 +339,8 @@ async function main() {
       },
       input.session_id
     );
-    const message = handoffFile ? `[PreCompact:auto] Created YAML handoff: thoughts/shared/handoffs/${sessionName}/${handoffFile} + checkpoint saved` : `[PreCompact:auto] Session summary auto-appended to ${mostRecent} + checkpoint saved`;
+    const checkpointStatus = checkpointId ? "+ checkpoint saved" : "(checkpoint failed)";
+    const message = handoffFile ? `[PreCompact:auto] Created YAML handoff: thoughts/shared/handoffs/${sessionName}/${handoffFile} ${checkpointStatus}` : `[PreCompact:auto] Session summary auto-appended to ${mostRecent} ${checkpointStatus}`;
     const output = {
       continue: true,
       systemMessage: message
