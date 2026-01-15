@@ -40,6 +40,12 @@ Each JSON file contains:
 | #85 | CLOSED | marcodelpin | docs: Add remote database setup documentation | [2](origin-pr-85.json) | See JSON |
 | #95 | MERGED | MiaoDX | fix: install scripts/mcp/ for external research tools | [1](origin-pr-95.json) | See JSON |
 | #97 | MERGED | marcodelpin | feat: add Ollama embedding provider with fallback | [3](origin-pr-97.json) | See JSON |
+| #102 | MERGED | parcadei | fix: use unique output filenames to prevent parallel agent collision | [2](origin-pr-102.json) | See JSON |
+| #88 | CLOSED | parcadei | fix: use CLAUDE_CONFIG_DIR for tldr_stats.py | [2](origin-pr-88.json) | See JSON |
+| #48 | MERGED | UAEpro | Fix formatting of description in SKILL.md | [1](origin-pr-48.json) | See JSON |
+| #45 | MERGED | ASRagab | (refactor): Adding Frontmatter to agents and updating contribution guidelines | [1](origin-pr-45.json) | See JSON |
+| #38 | CLOSED | OCWC22 | Claude/repo review sponsors fl8 jq | [2](origin-pr-38.json) | See JSON |
+| #20 | MERGED | parcadei | fix: add CLAUDE_OPC_DIR env var support for global hook installation | [1](origin-pr-20.json) | See JSON |
 
 ## Fork (marcodelpin/Continuous-Claude-v3)
 
@@ -80,14 +86,14 @@ Each JSON file contains:
 
 ## Statistics
 
-Generated: 2026-01-15T09:09:27+01:00
+Generated: 2026-01-15T09:50:00+01:00
 
 ### By Repository
-- **Origin**: 21 PRs with reviews
+- **Origin**: 27 PRs with reviews
 - **Fork**: 7 PRs with reviews
 
 ### Total Reviews
-69 reviews across all PRs
+82 reviews across 34 PRs
 
 ## JSON Field Reference
 
