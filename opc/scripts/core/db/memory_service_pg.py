@@ -109,21 +109,30 @@ class MemoryServicePG:
         pass
 
     @staticmethod
-    def _safe_json_loads(value: str | None, default: Any) -> Any:
+    def _safe_json_loads(value: str | list | dict | None, default: Any) -> Any:
         """Safely parse JSON with fallback to default.
 
+        Handles both string JSON and already-decoded objects (asyncpg auto-decodes
+        JSON columns to Python types in some configurations).
+
         Args:
-            value: JSON string or None
-            default: Value to return if parsing fails
+            value: JSON string, already-decoded list/dict, or None
+            default: Value to return if parsing fails or value is empty
 
         Returns:
             Parsed JSON or default value
         """
+        if value is None:
+            return default
+        # If asyncpg already decoded JSON to Python type, return as-is
+        if isinstance(value, (list, dict)):
+            return value
+        # Empty string check
         if not value:
             return default
         try:
             return json.loads(value)
-        except (json.JSONDecodeError, TypeError):
+        except json.JSONDecodeError:
             return default
 
     # ==================== Core Memory ====================

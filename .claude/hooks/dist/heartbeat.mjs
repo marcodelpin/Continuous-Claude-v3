@@ -131,17 +131,25 @@ if not pg_url:
 
 async def main():
     try:
-        conn = await asyncpg.connect(pg_url)
+        # 5 second timeout to avoid hanging on unreachable DB
+        conn = await asyncio.wait_for(asyncpg.connect(pg_url), timeout=5.0)
+    except asyncio.TimeoutError:
+        print('connection_timeout', file=sys.stderr)
+        sys.exit(1)
     except Exception as e:
         print(f'connection_error: {e}', file=sys.stderr)
-        return
+        sys.exit(1)
     try:
         result = await conn.execute('''
             UPDATE sessions
             SET last_heartbeat = NOW(), project = $2
             WHERE id = $1
         ''', session_id, project)
-        print('ok')
+        # Check if any row was updated
+        if result == 'UPDATE 0':
+            print('no_session_found', file=sys.stderr)
+        else:
+            print('ok')
     finally:
         await conn.close()
 
