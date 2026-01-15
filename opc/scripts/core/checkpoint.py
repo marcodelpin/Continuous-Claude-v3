@@ -206,19 +206,25 @@ def main():
 
     if args.command == "create":
         # Prefer JSON args (safe for special chars) over comma-separated (deprecated)
+        files = None
         if args.files_json:
-            files = json.loads(args.files_json)
+            try:
+                files = json.loads(args.files_json)
+            except json.JSONDecodeError as e:
+                print(f"Error: Invalid JSON in --files-json: {e}", file=sys.stderr)
+                sys.exit(1)
         elif args.files:
             files = [f.strip() for f in args.files.split(",") if f.strip()]
-        else:
-            files = None
 
+        unknowns = None
         if args.unknowns_json:
-            unknowns = json.loads(args.unknowns_json)
+            try:
+                unknowns = json.loads(args.unknowns_json)
+            except json.JSONDecodeError as e:
+                print(f"Error: Invalid JSON in --unknowns-json: {e}", file=sys.stderr)
+                sys.exit(1)
         elif args.unknowns:
             unknowns = [u.strip() for u in args.unknowns.split(",") if u.strip()]
-        else:
-            unknowns = None
 
         checkpoint_id = asyncio.run(
             create_checkpoint(
