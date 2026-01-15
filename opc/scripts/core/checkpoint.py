@@ -141,7 +141,7 @@ def format_checkpoint(cp: dict, verbose: bool = False) -> str:
         created_str = str(created) if created else "unknown"
 
     context = cp.get("context_usage")
-    context_str = f"{context:.0%}" if context else "N/A"
+    context_str = f"{context:.0%}" if context is not None else "N/A"
 
     files = cp.get("files_modified", [])
     files_str = f"{len(files)} files" if files else "no files"
