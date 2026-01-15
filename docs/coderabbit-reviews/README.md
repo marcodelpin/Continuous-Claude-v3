@@ -52,12 +52,15 @@ Each JSON file contains:
 | PR | State | Author | Title | Reviews | Last Commit |
 |----|-------|--------|-------|---------|-------------|
 | #1 | CLOSED | marcodelpin | feat: add Ollama embedding provider with fallback | [4](fork-pr-1.json) | See JSON |
-| #10 | CLOSED | marcodelpin | feat: add Ollama embedding provider with fallback | [1](fork-pr-10.json) | See JSON |
-| #11 | OPEN | marcodelpin | feat: add Ollama embedding provider with fallback | [1](fork-pr-11.json) | See JSON |
 | #2 | CLOSED | marcodelpin | docs: Add remote database setup documentation | [2](fork-pr-2.json) | See JSON |
 | #3 | CLOSED | marcodelpin | fix: persist session ID across hooks via file | [1](fork-pr-3.json) | See JSON |
 | #4 | CLOSED | marcodelpin | fix: session heartbeat updates project on ID reuse | [1](fork-pr-4.json) | See JSON |
 | #5 | CLOSED | marcodelpin | feat: add Ollama embedding provider with fallback | [1](fork-pr-5.json) | See JSON |
+| #10 | CLOSED | marcodelpin | feat: add Ollama embedding provider with fallback | [1](fork-pr-10.json) | See JSON |
+| #11 | CLOSED | marcodelpin | feat: add Ollama embedding provider with fallback | [2](fork-pr-11.json) | See JSON |
+| #12 | CLOSED | marcodelpin | fix: use per-project session ID file to prevent collision | [1](fork-pr-12.json) | See JSON |
+| #13 | CLOSED | marcodelpin | feat: Complete PostgreSQL implementation for all cc-v3 tables | [2](fork-pr-13.json) | See JSON |
+| #14 | CLOSED | marcodelpin | feat: Complete PostgreSQL implementation for all cc-v3 tables | [2](fork-pr-14.json) | See JSON |
 
 ## Review Detail Index
 
@@ -86,14 +89,14 @@ Each JSON file contains:
 
 ## Statistics
 
-Generated: 2026-01-15T09:50:00+01:00
+Generated: 2026-01-15T10:05:00+01:00
 
 ### By Repository
 - **Origin**: 27 PRs with reviews
-- **Fork**: 7 PRs with reviews
+- **Fork**: 10 PRs with reviews
 
 ### Total Reviews
-82 reviews across 34 PRs
+113 reviews across 37 PRs
 
 ## JSON Field Reference
 
