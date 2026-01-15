@@ -530,7 +530,7 @@ class OllamaEmbeddingProvider(EmbeddingProvider):
         """Close the HTTP client."""
         await self._client.aclose()
 
-    async def __aenter__(self) -> "OllamaEmbeddingProvider":
+    async def __aenter__(self) -> OllamaEmbeddingProvider:
         """Enter async context manager."""
         return self
 

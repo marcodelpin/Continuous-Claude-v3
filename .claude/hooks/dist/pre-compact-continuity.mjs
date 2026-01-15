@@ -279,7 +279,7 @@ function storeCheckpoint(checkpoint, sessionId, agentId) {
     timeout: 1e4
   });
   if (result.status === 0 && result.stdout) {
-    const match = result.stdout.match(/Created checkpoint: ([a-f0-9-]+)/);
+    const match = result.stdout.match(/Created checkpoint: ([a-f0-9-]+)/i);
     return match ? match[1] : null;
   }
   if (result.stderr) {

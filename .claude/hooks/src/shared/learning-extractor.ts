@@ -258,7 +258,7 @@ export function storeCheckpoint(
 
   if (result.status === 0 && result.stdout) {
     // Output is "Created checkpoint: <uuid>"
-    const match = result.stdout.match(/Created checkpoint: ([a-f0-9-]+)/);
+    const match = result.stdout.match(/Created checkpoint: ([a-f0-9-]+)/i);
     return match ? match[1] : null;
   }
 

@@ -123,10 +123,18 @@ import os
 
 session_id = sys.argv[1]
 project = sys.argv[2]
-pg_url = os.environ.get('CONTINUOUS_CLAUDE_DB_URL', 'postgresql://claude:claude_dev@localhost:5432/continuous_claude')
+# Connection URL from environment - no hardcoded credentials
+pg_url = os.environ.get('CONTINUOUS_CLAUDE_DB_URL') or os.environ.get('DATABASE_URL')
+if not pg_url:
+    print('CONTINUOUS_CLAUDE_DB_URL or DATABASE_URL not set', file=sys.stderr)
+    sys.exit(1)
 
 async def main():
-    conn = await asyncpg.connect(pg_url)
+    try:
+        conn = await asyncpg.connect(pg_url)
+    except Exception as e:
+        print(f'connection_error: {e}', file=sys.stderr)
+        return
     try:
         result = await conn.execute('''
             UPDATE sessions
