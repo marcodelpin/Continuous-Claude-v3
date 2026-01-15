@@ -1,1 +1,6 @@
+# CodeRabbit reviews with local paths
 docs/coderabbit-reviews/origin-pr-76.json:local-username-path:1
+
+# Dev database connection strings with default passwords
+.claude/hooks/dist/heartbeat.mjs:connection-string-with-password:38
+.claude/hooks/src/heartbeat.ts:connection-string-with-password:46
