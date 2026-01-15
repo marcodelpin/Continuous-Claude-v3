@@ -241,7 +241,7 @@ function getOpcDir() {
 }
 
 // src/shared/learning-extractor.ts
-async function storeCheckpoint(checkpoint, sessionId, agentId) {
+function storeCheckpoint(checkpoint, sessionId, agentId) {
   const opcDir = getOpcDir();
   if (!opcDir) return null;
   const args = [
@@ -261,10 +261,10 @@ async function storeCheckpoint(checkpoint, sessionId, agentId) {
     args.push("--context-usage", checkpoint.contextUsage.toString());
   }
   if (checkpoint.filesModified && checkpoint.filesModified.length > 0) {
-    args.push("--files", checkpoint.filesModified.join(","));
+    args.push("--files-json", JSON.stringify(checkpoint.filesModified));
   }
   if (checkpoint.unknowns && checkpoint.unknowns.length > 0) {
-    args.push("--unknowns", checkpoint.unknowns.join(","));
+    args.push("--unknowns-json", JSON.stringify(checkpoint.unknowns));
   }
   if (checkpoint.handoffPath) {
     args.push("--handoff-path", checkpoint.handoffPath);
@@ -329,7 +329,7 @@ async function main() {
     }
     const editedFiles = getEditedFiles(projectDir, input.session_id);
     const handoffPath = handoffFile ? `thoughts/shared/handoffs/${sessionName}/${handoffFile}` : void 0;
-    const checkpointId = await storeCheckpoint(
+    const checkpointId = storeCheckpoint(
       {
         phase: "pre-compact",
         contextUsage: 0.95,

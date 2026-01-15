@@ -211,11 +211,11 @@ export interface CheckpointData {
  * Checkpoints are designed for crash recovery and session continuity.
  * They track phase progress, context usage, and modified files.
  */
-export async function storeCheckpoint(
+export function storeCheckpoint(
   checkpoint: CheckpointData,
   sessionId: string,
   agentId?: string
-): Promise<string | null> {
+): string | null {
   const opcDir = getOpcDir();
   if (!opcDir) return null;  // Graceful degradation
 
@@ -234,11 +234,12 @@ export async function storeCheckpoint(
   }
 
   if (checkpoint.filesModified && checkpoint.filesModified.length > 0) {
-    args.push('--files', checkpoint.filesModified.join(','));
+    // Use JSON encoding to safely pass arrays with special characters
+    args.push('--files-json', JSON.stringify(checkpoint.filesModified));
   }
 
   if (checkpoint.unknowns && checkpoint.unknowns.length > 0) {
-    args.push('--unknowns', checkpoint.unknowns.join(','));
+    args.push('--unknowns-json', JSON.stringify(checkpoint.unknowns));
   }
 
   if (checkpoint.handoffPath) {
@@ -267,10 +268,10 @@ export async function storeCheckpoint(
 /**
  * Get the latest checkpoint from the database
  */
-export async function getLatestCheckpoint(
+export function getLatestCheckpoint(
   sessionId: string,
   agentId?: string
-): Promise<CheckpointData | null> {
+): CheckpointData | null {
   const opcDir = getOpcDir();
   if (!opcDir) return null;
 

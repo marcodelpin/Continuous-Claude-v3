@@ -175,8 +175,10 @@ def main():
     create_parser.add_argument("--phase", required=True, help="Current work phase")
     create_parser.add_argument("--agent-id", help="Optional agent identifier")
     create_parser.add_argument("--context-usage", type=float, help="Context usage (0.0-1.0)")
-    create_parser.add_argument("--files", help="Comma-separated list of modified files")
-    create_parser.add_argument("--unknowns", help="Comma-separated list of unknowns/questions")
+    create_parser.add_argument("--files", help="Comma-separated list of modified files (deprecated)")
+    create_parser.add_argument("--files-json", help="JSON array of modified files")
+    create_parser.add_argument("--unknowns", help="Comma-separated list of unknowns (deprecated)")
+    create_parser.add_argument("--unknowns-json", help="JSON array of unknowns/questions")
     create_parser.add_argument("--handoff-path", help="Path to associated handoff file")
 
     # Get command
@@ -203,8 +205,20 @@ def main():
     args = parser.parse_args()
 
     if args.command == "create":
-        files = [f.strip() for f in args.files.split(",") if f.strip()] if args.files else None
-        unknowns = [u.strip() for u in args.unknowns.split(",") if u.strip()] if args.unknowns else None
+        # Prefer JSON args (safe for special chars) over comma-separated (deprecated)
+        if args.files_json:
+            files = json.loads(args.files_json)
+        elif args.files:
+            files = [f.strip() for f in args.files.split(",") if f.strip()]
+        else:
+            files = None
+
+        if args.unknowns_json:
+            unknowns = json.loads(args.unknowns_json)
+        elif args.unknowns:
+            unknowns = [u.strip() for u in args.unknowns.split(",") if u.strip()]
+        else:
+            unknowns = None
 
         checkpoint_id = asyncio.run(
             create_checkpoint(

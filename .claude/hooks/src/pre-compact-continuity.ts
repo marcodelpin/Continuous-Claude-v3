@@ -82,7 +82,7 @@ async function main() {
       ? `thoughts/shared/handoffs/${sessionName}/${handoffFile}`
       : undefined;
 
-    const checkpointId = await storeCheckpoint(
+    const checkpointId = storeCheckpoint(
       {
         phase: 'pre-compact',
         contextUsage: 0.95,  // Compacting means we're near limit
