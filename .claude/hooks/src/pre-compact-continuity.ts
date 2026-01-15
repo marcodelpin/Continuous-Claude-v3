@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { parseTranscript, generateAutoHandoff } from './transcript-parser.js';
+import { storeCheckpoint } from './shared/learning-extractor.js';
 
 interface PreCompactInput {
   trigger: 'manual' | 'auto';
@@ -75,9 +76,25 @@ async function main() {
       }
     }
 
+    // Store checkpoint to database for crash recovery
+    const editedFiles = getEditedFiles(projectDir, input.session_id);
+    const handoffPath = handoffFile
+      ? `thoughts/shared/handoffs/${sessionName}/${handoffFile}`
+      : undefined;
+
+    await storeCheckpoint(
+      {
+        phase: 'pre-compact',
+        contextUsage: 0.95,  // Compacting means we're near limit
+        filesModified: editedFiles,
+        handoffPath: handoffPath
+      },
+      input.session_id
+    );
+
     const message = handoffFile
-      ? `[PreCompact:auto] Created YAML handoff: thoughts/shared/handoffs/${sessionName}/${handoffFile}`
-      : `[PreCompact:auto] Session summary auto-appended to ${mostRecent}`;
+      ? `[PreCompact:auto] Created YAML handoff: thoughts/shared/handoffs/${sessionName}/${handoffFile} + checkpoint saved`
+      : `[PreCompact:auto] Session summary auto-appended to ${mostRecent} + checkpoint saved`;
 
     const output: HookOutput = {
       continue: true,
@@ -94,29 +111,37 @@ async function main() {
   }
 }
 
+/**
+ * Get list of edited files from the session cache
+ */
+function getEditedFiles(projectDir: string, sessionId: string): string[] {
+  const cacheDir = path.join(projectDir, '.claude', 'tsc-cache', sessionId || 'default');
+  const editedFilesPath = path.join(cacheDir, 'edited-files.log');
+
+  if (!fs.existsSync(editedFilesPath)) {
+    return [];
+  }
+
+  const content = fs.readFileSync(editedFilesPath, 'utf-8');
+  // Format: timestamp:filepath:repo per line
+  return [...new Set(
+    content.split('\n')
+      .filter(line => line.trim())
+      .map(line => {
+        const parts = line.split(':');
+        // filepath is second part, remove project dir prefix
+        return parts[1]?.replace(projectDir + '/', '') || '';
+      })
+      .filter(f => f)
+  )];
+}
+
 function generateAutoSummary(projectDir: string, sessionId: string): string | null {
   const timestamp = new Date().toISOString();
   const lines: string[] = [];
 
   // Read edited files from PostToolUse cache
-  const cacheDir = path.join(projectDir, '.claude', 'tsc-cache', sessionId || 'default');
-  const editedFilesPath = path.join(cacheDir, 'edited-files.log');
-
-  let editedFiles: string[] = [];
-  if (fs.existsSync(editedFilesPath)) {
-    const content = fs.readFileSync(editedFilesPath, 'utf-8');
-    // Format: timestamp:filepath:repo per line
-    editedFiles = [...new Set(
-      content.split('\n')
-        .filter(line => line.trim())
-        .map(line => {
-          const parts = line.split(':');
-          // filepath is second part, remove project dir prefix
-          return parts[1]?.replace(projectDir + '/', '') || '';
-        })
-        .filter(f => f)
-    )];
-  }
+  const editedFiles = getEditedFiles(projectDir, sessionId);
 
   // Read build attempts from .git/claude
   const gitClaudeDir = path.join(projectDir, '.git', 'claude', 'branches');
