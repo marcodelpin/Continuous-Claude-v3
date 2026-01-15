@@ -1331,14 +1331,21 @@ class MemoryServicePG:
 
         Returns:
             True if deleted, False if not found
+
+        Note:
+            Filters by agent_id and session_id for consistency with
+            get_latest_checkpoint and get_checkpoints.
         """
+        agent_id = self.agent_id or "main"
+
         async with get_connection() as conn:
             result = await conn.execute(
                 """
                 DELETE FROM checkpoints
-                WHERE id = $1 AND session_id = $2
+                WHERE id = $1 AND agent_id = $2 AND session_id = $3
                 """,
                 checkpoint_id,
+                agent_id,
                 self.session_id,
             )
             return result == "DELETE 1"

@@ -90,13 +90,6 @@ function getSessionIdFile(options = {}) {
   }
   return join2(claudeDir, SESSION_ID_FILENAME);
 }
-function generateSessionId() {
-  const spanId = process.env.BRAINTRUST_SPAN_ID;
-  if (spanId) {
-    return spanId.slice(0, 8);
-  }
-  return `s-${Date.now().toString(36)}`;
-}
 function readSessionId() {
   try {
     const sessionFile = getSessionIdFile();
@@ -105,19 +98,6 @@ function readSessionId() {
   } catch {
     return null;
   }
-}
-function getSessionId(options = {}) {
-  if (process.env.COORDINATION_SESSION_ID) {
-    return process.env.COORDINATION_SESSION_ID;
-  }
-  const fileId = readSessionId();
-  if (fileId) {
-    return fileId;
-  }
-  if (options.debug) {
-    console.error("[session-id] WARNING: No persisted session ID found, generating new one");
-  }
-  return generateSessionId();
 }
 function getProject() {
   return process.env.CLAUDE_PROJECT_DIR || process.cwd();
@@ -129,7 +109,7 @@ function main() {
     console.log(JSON.stringify({ result: "continue" }));
     return;
   }
-  const sessionId = getSessionId();
+  const sessionId = readSessionId();
   const project = getProject();
   if (!sessionId) {
     console.log(JSON.stringify({ result: "continue" }));

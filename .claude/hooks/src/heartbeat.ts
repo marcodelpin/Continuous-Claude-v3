@@ -10,7 +10,7 @@
  */
 
 import { runPgQuery } from './shared/db-utils-pg.js';
-import { getSessionId, getProject } from './shared/session-id.js';
+import { readSessionId, getProject } from './shared/session-id.js';
 import type { HookOutput } from './shared/types.js';
 
 /**
@@ -24,10 +24,13 @@ export function main(): void {
     return;
   }
 
-  const sessionId = getSessionId();
+  // Use readSessionId() directly - returns null if no persisted session
+  // (getSessionId() always returns a value via fallback, which would cause
+  // UPDATE to silently affect 0 rows if the ID doesn't exist in DB)
+  const sessionId = readSessionId();
   const project = getProject();
 
-  // Skip if no session ID
+  // Skip if no persisted session ID - nothing to update
   if (!sessionId) {
     console.log(JSON.stringify({ result: 'continue' } as HookOutput));
     return;
