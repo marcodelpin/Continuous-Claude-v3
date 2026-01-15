@@ -1178,3 +1178,216 @@ class MemoryServicePG:
                 lines.append("(empty)")
 
         return "\n".join(lines)
+
+    # ==================== Checkpoint Operations ====================
+
+    async def create_checkpoint(
+        self,
+        phase: str,
+        context_usage: float | None = None,
+        files_modified: list[str] | None = None,
+        unknowns: list[str] | None = None,
+        handoff_path: str | None = None,
+    ) -> str:
+        """Create a checkpoint for crash recovery and session continuity.
+
+        Args:
+            phase: Current work phase (e.g., "planning", "implementation", "testing")
+            context_usage: Optional context usage percentage (0.0 to 1.0)
+            files_modified: Optional list of files modified in this phase
+            unknowns: Optional list of unresolved questions/issues
+            handoff_path: Optional path to associated handoff file
+
+        Returns:
+            Checkpoint ID
+        """
+        checkpoint_id = generate_memory_id()
+        agent_id = self.agent_id or "main"
+
+        async with get_transaction() as conn:
+            await conn.execute(
+                """
+                INSERT INTO checkpoints
+                    (id, agent_id, session_id, phase, context_usage,
+                     files_modified, unknowns, handoff_path)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                """,
+                checkpoint_id,
+                agent_id,
+                self.session_id,
+                phase,
+                context_usage,
+                json.dumps(files_modified or []),
+                json.dumps(unknowns or []),
+                handoff_path,
+            )
+
+        return checkpoint_id
+
+    async def get_latest_checkpoint(self) -> dict[str, Any] | None:
+        """Get the most recent checkpoint for this agent/session.
+
+        Returns:
+            Checkpoint dict or None if no checkpoints exist
+        """
+        agent_id = self.agent_id or "main"
+
+        async with get_connection() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id, agent_id, session_id, phase, context_usage,
+                       files_modified, unknowns, handoff_path, created_at
+                FROM checkpoints
+                WHERE agent_id = $1 AND session_id = $2
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                agent_id,
+                self.session_id,
+            )
+
+            if row is None:
+                return None
+
+            return {
+                "id": str(row["id"]),
+                "agent_id": row["agent_id"],
+                "session_id": row["session_id"],
+                "phase": row["phase"],
+                "context_usage": row["context_usage"],
+                "files_modified": json.loads(row["files_modified"]) if row["files_modified"] else [],
+                "unknowns": json.loads(row["unknowns"]) if row["unknowns"] else [],
+                "handoff_path": row["handoff_path"],
+                "created_at": row["created_at"],
+            }
+
+    async def get_checkpoints(
+        self,
+        limit: int = 10,
+        since: datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get checkpoints for this agent/session.
+
+        Args:
+            limit: Maximum number of checkpoints to return
+            since: Optional datetime to filter checkpoints after
+
+        Returns:
+            List of checkpoint dicts, most recent first
+        """
+        agent_id = self.agent_id or "main"
+
+        async with get_connection() as conn:
+            if since is not None:
+                rows = await conn.fetch(
+                    """
+                    SELECT id, agent_id, session_id, phase, context_usage,
+                           files_modified, unknowns, handoff_path, created_at
+                    FROM checkpoints
+                    WHERE agent_id = $1 AND session_id = $2 AND created_at >= $3
+                    ORDER BY created_at DESC
+                    LIMIT $4
+                    """,
+                    agent_id,
+                    self.session_id,
+                    since,
+                    limit,
+                )
+            else:
+                rows = await conn.fetch(
+                    """
+                    SELECT id, agent_id, session_id, phase, context_usage,
+                           files_modified, unknowns, handoff_path, created_at
+                    FROM checkpoints
+                    WHERE agent_id = $1 AND session_id = $2
+                    ORDER BY created_at DESC
+                    LIMIT $3
+                    """,
+                    agent_id,
+                    self.session_id,
+                    limit,
+                )
+
+            return [
+                {
+                    "id": str(row["id"]),
+                    "agent_id": row["agent_id"],
+                    "session_id": row["session_id"],
+                    "phase": row["phase"],
+                    "context_usage": row["context_usage"],
+                    "files_modified": json.loads(row["files_modified"]) if row["files_modified"] else [],
+                    "unknowns": json.loads(row["unknowns"]) if row["unknowns"] else [],
+                    "handoff_path": row["handoff_path"],
+                    "created_at": row["created_at"],
+                }
+                for row in rows
+            ]
+
+    async def delete_checkpoint(self, checkpoint_id: str) -> bool:
+        """Delete a checkpoint by ID.
+
+        Args:
+            checkpoint_id: Checkpoint ID to delete
+
+        Returns:
+            True if deleted, False if not found
+        """
+        async with get_connection() as conn:
+            result = await conn.execute(
+                """
+                DELETE FROM checkpoints
+                WHERE id = $1 AND session_id = $2
+                """,
+                checkpoint_id,
+                self.session_id,
+            )
+            return result == "DELETE 1"
+
+    async def cleanup_old_checkpoints(
+        self,
+        keep_count: int = 5,
+    ) -> int:
+        """Delete old checkpoints, keeping only the most recent ones.
+
+        Args:
+            keep_count: Number of recent checkpoints to keep per agent
+
+        Returns:
+            Number of checkpoints deleted
+        """
+        agent_id = self.agent_id or "main"
+
+        async with get_transaction() as conn:
+            # Get IDs to keep
+            keep_rows = await conn.fetch(
+                """
+                SELECT id FROM checkpoints
+                WHERE agent_id = $1 AND session_id = $2
+                ORDER BY created_at DESC
+                LIMIT $3
+                """,
+                agent_id,
+                self.session_id,
+                keep_count,
+            )
+            keep_ids = [str(row["id"]) for row in keep_rows]
+
+            if not keep_ids:
+                return 0
+
+            # Delete all others
+            result = await conn.execute(
+                """
+                DELETE FROM checkpoints
+                WHERE agent_id = $1 AND session_id = $2
+                AND id != ALL($3::uuid[])
+                """,
+                agent_id,
+                self.session_id,
+                keep_ids,
+            )
+
+            # Parse "DELETE N" to get count
+            if result and result.startswith("DELETE "):
+                return int(result.split()[1])
+            return 0

@@ -194,3 +194,120 @@ export function extractAgentLearning(
     context: agentPrompt
   };
 }
+
+// ==================== Checkpoint Operations ====================
+
+export interface CheckpointData {
+  phase: string;
+  contextUsage?: number;
+  filesModified?: string[];
+  unknowns?: string[];
+  handoffPath?: string;
+}
+
+/**
+ * Store a checkpoint to the PostgreSQL checkpoints table via checkpoint.py
+ *
+ * Checkpoints are designed for crash recovery and session continuity.
+ * They track phase progress, context usage, and modified files.
+ */
+export async function storeCheckpoint(
+  checkpoint: CheckpointData,
+  sessionId: string,
+  agentId?: string
+): Promise<string | null> {
+  const opcDir = getOpcDir();
+  if (!opcDir) return null;  // Graceful degradation
+
+  const args = [
+    'run', 'python', 'scripts/core/checkpoint.py', 'create',
+    '--session-id', sessionId,
+    '--phase', checkpoint.phase
+  ];
+
+  if (agentId) {
+    args.push('--agent-id', agentId);
+  }
+
+  if (checkpoint.contextUsage !== undefined) {
+    args.push('--context-usage', checkpoint.contextUsage.toString());
+  }
+
+  if (checkpoint.filesModified && checkpoint.filesModified.length > 0) {
+    args.push('--files', checkpoint.filesModified.join(','));
+  }
+
+  if (checkpoint.unknowns && checkpoint.unknowns.length > 0) {
+    args.push('--unknowns', checkpoint.unknowns.join(','));
+  }
+
+  if (checkpoint.handoffPath) {
+    args.push('--handoff-path', checkpoint.handoffPath);
+  }
+
+  const result = spawnSync('uv', args, {
+    encoding: 'utf-8',
+    cwd: opcDir,
+    env: {
+      ...process.env,
+      PYTHONPATH: opcDir
+    },
+    timeout: 10000
+  });
+
+  if (result.status === 0 && result.stdout) {
+    // Output is "Created checkpoint: <uuid>"
+    const match = result.stdout.match(/Created checkpoint: ([a-f0-9-]+)/);
+    return match ? match[1] : null;
+  }
+
+  return null;
+}
+
+/**
+ * Get the latest checkpoint from the database
+ */
+export async function getLatestCheckpoint(
+  sessionId: string,
+  agentId?: string
+): Promise<CheckpointData | null> {
+  const opcDir = getOpcDir();
+  if (!opcDir) return null;
+
+  const args = [
+    'run', 'python', 'scripts/core/checkpoint.py', 'get',
+    '--session-id', sessionId,
+    '--json'
+  ];
+
+  if (agentId) {
+    args.push('--agent-id', agentId);
+  }
+
+  const result = spawnSync('uv', args, {
+    encoding: 'utf-8',
+    cwd: opcDir,
+    env: {
+      ...process.env,
+      PYTHONPATH: opcDir
+    },
+    timeout: 10000
+  });
+
+  if (result.status === 0 && result.stdout) {
+    try {
+      const data = JSON.parse(result.stdout);
+      return {
+        phase: data.phase,
+        contextUsage: data.context_usage,
+        filesModified: data.files_modified,
+        unknowns: data.unknowns,
+        handoffPath: data.handoff_path
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
