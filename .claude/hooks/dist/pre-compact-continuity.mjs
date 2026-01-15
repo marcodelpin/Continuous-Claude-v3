@@ -363,8 +363,11 @@ function getEditedFiles(projectDir, sessionId) {
   const content = fs2.readFileSync(editedFilesPath, "utf-8");
   return [...new Set(
     content.split("\n").filter((line) => line.trim()).map((line) => {
-      const parts = line.split(":");
-      return parts[1]?.replace(projectDir + "/", "") || "";
+      const firstColon = line.indexOf(":");
+      const lastColon = line.lastIndexOf(":");
+      if (firstColon === -1 || lastColon === firstColon) return "";
+      const filepath = line.slice(firstColon + 1, lastColon);
+      return filepath.replace(projectDir + "/", "").replace(projectDir + "\\", "") || "";
     }).filter((f) => f)
   )];
 }

@@ -124,13 +124,17 @@ function getEditedFiles(projectDir: string, sessionId: string): string[] {
 
   const content = fs.readFileSync(editedFilesPath, 'utf-8');
   // Format: timestamp:filepath:repo per line
+  // Use indexOf/lastIndexOf to handle colons in filepath (e.g., Windows C:\...)
   return [...new Set(
     content.split('\n')
       .filter(line => line.trim())
       .map(line => {
-        const parts = line.split(':');
-        // filepath is second part, remove project dir prefix
-        return parts[1]?.replace(projectDir + '/', '') || '';
+        const firstColon = line.indexOf(':');
+        const lastColon = line.lastIndexOf(':');
+        if (firstColon === -1 || lastColon === firstColon) return '';
+        const filepath = line.slice(firstColon + 1, lastColon);
+        // Normalize path separators and remove project dir prefix
+        return filepath.replace(projectDir + '/', '').replace(projectDir + '\\', '') || '';
       })
       .filter(f => f)
   )];

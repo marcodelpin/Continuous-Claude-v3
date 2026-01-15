@@ -203,8 +203,8 @@ def main():
     args = parser.parse_args()
 
     if args.command == "create":
-        files = args.files.split(",") if args.files else None
-        unknowns = args.unknowns.split(",") if args.unknowns else None
+        files = [f.strip() for f in args.files.split(",") if f.strip()] if args.files else None
+        unknowns = [u.strip() for u in args.unknowns.split(",") if u.strip()] if args.unknowns else None
 
         checkpoint_id = asyncio.run(
             create_checkpoint(
