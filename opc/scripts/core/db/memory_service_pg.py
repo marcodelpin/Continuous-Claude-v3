@@ -1949,3 +1949,582 @@ class MemoryServicePG:
     async def get_errors(self, limit: int = 50) -> list[dict[str, Any]]:
         """Get recent error logs for this session."""
         return await self.get_logs(level='error', limit=limit)
+
+    # ==================== Temporal Facts Operations ====================
+
+    async def store_fact(
+        self,
+        fact_type: str,
+        content: str,
+        confidence: float = 1.0,
+        source_turn: int | None = None,
+        expires_at: datetime | None = None,
+        metadata: dict[str, Any] | None = None,
+        embedding: list[float] | None = None,
+    ) -> str:
+        """Store a temporal fact with optional expiration.
+
+        Args:
+            fact_type: Type of fact ('observation', 'decision', 'learning', 'preference')
+            content: Fact content
+            confidence: Confidence level (0.0 to 1.0)
+            source_turn: Turn number where fact was created
+            expires_at: Optional expiration time
+            metadata: Optional additional metadata
+            embedding: Optional pre-computed embedding (1536 dims for ada-002)
+
+        Returns:
+            Fact UUID
+        """
+        fact_id = generate_memory_id()
+
+        async with get_transaction() as conn:
+            if embedding and len(embedding) > 0:
+                await init_pgvector(conn)
+                await conn.execute(
+                    """
+                    INSERT INTO temporal_facts
+                        (id, session_id, fact_type, content, confidence,
+                         source_turn, expires_at, metadata, embedding)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    """,
+                    fact_id,
+                    self.session_id,
+                    fact_type,
+                    content,
+                    confidence,
+                    source_turn,
+                    expires_at,
+                    json.dumps(metadata or {}),
+                    embedding,
+                )
+            else:
+                await conn.execute(
+                    """
+                    INSERT INTO temporal_facts
+                        (id, session_id, fact_type, content, confidence,
+                         source_turn, expires_at, metadata)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    """,
+                    fact_id,
+                    self.session_id,
+                    fact_type,
+                    content,
+                    confidence,
+                    source_turn,
+                    expires_at,
+                    json.dumps(metadata or {}),
+                )
+
+        return fact_id
+
+    async def get_active_facts(
+        self,
+        fact_type: str | None = None,
+        min_confidence: float = 0.0,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Get active (non-expired) facts.
+
+        Args:
+            fact_type: Optional filter by type
+            min_confidence: Minimum confidence threshold
+            limit: Max facts to return
+
+        Returns:
+            List of fact dicts
+        """
+        conditions = [
+            "session_id = $1",
+            "(expires_at IS NULL OR expires_at > NOW())",
+            "confidence >= $2",
+        ]
+        params: list[Any] = [self.session_id, min_confidence]
+        param_idx = 3
+
+        if fact_type:
+            conditions.append(f"fact_type = ${param_idx}")
+            params.append(fact_type)
+            param_idx += 1
+
+        params.append(limit)
+
+        async with get_connection() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT id, session_id, fact_type, content, confidence,
+                       source_turn, created_at, expires_at, metadata
+                FROM temporal_facts
+                WHERE {' AND '.join(conditions)}
+                ORDER BY created_at DESC
+                LIMIT ${param_idx}
+                """,
+                *params,
+            )
+
+            return [
+                {
+                    "id": str(row["id"]),
+                    "session_id": row["session_id"],
+                    "fact_type": row["fact_type"],
+                    "content": row["content"],
+                    "confidence": row["confidence"],
+                    "source_turn": row["source_turn"],
+                    "created_at": row["created_at"],
+                    "expires_at": row["expires_at"],
+                    "metadata": json.loads(row["metadata"]) if row["metadata"] else {},
+                }
+                for row in rows
+            ]
+
+    async def expire_old_facts(self) -> int:
+        """Remove expired facts from this session.
+
+        Returns:
+            Number of facts deleted
+        """
+        async with get_connection() as conn:
+            result = await conn.execute(
+                """
+                DELETE FROM temporal_facts
+                WHERE session_id = $1
+                AND expires_at IS NOT NULL
+                AND expires_at < NOW()
+                """,
+                self.session_id,
+            )
+            if result and result.startswith("DELETE "):
+                return int(result.split()[1])
+            return 0
+
+    # ==================== User Preferences Operations ====================
+
+    async def record_preference(
+        self,
+        user_id: str,
+        proposition: str,
+        choice: str,
+        context: str | None = None,
+    ) -> None:
+        """Record or update a user preference.
+
+        Uses upsert to increment count if preference already exists.
+
+        Args:
+            user_id: User identifier
+            proposition: The proposition/question
+            choice: The user's choice
+            context: Optional context for this preference
+        """
+        async with get_transaction() as conn:
+            await conn.execute(
+                """
+                INSERT INTO user_preferences
+                    (user_id, proposition, choice, context, count, last_used)
+                VALUES ($1, $2, $3, $4, 1, NOW())
+                ON CONFLICT (user_id, proposition, choice)
+                DO UPDATE SET
+                    count = user_preferences.count + 1,
+                    last_used = NOW(),
+                    context = COALESCE(EXCLUDED.context, user_preferences.context)
+                """,
+                user_id,
+                proposition,
+                choice,
+                context,
+            )
+
+    async def get_preferences(
+        self,
+        user_id: str,
+        proposition: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get user preferences.
+
+        Args:
+            user_id: User identifier
+            proposition: Optional filter by proposition
+
+        Returns:
+            List of preference dicts sorted by count (most chosen first)
+        """
+        conditions = ["user_id = $1"]
+        params: list[Any] = [user_id]
+        param_idx = 2
+
+        if proposition:
+            conditions.append(f"proposition = ${param_idx}")
+            params.append(proposition)
+
+        async with get_connection() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT id, user_id, proposition, choice, context, count, last_used
+                FROM user_preferences
+                WHERE {' AND '.join(conditions)}
+                ORDER BY count DESC, last_used DESC
+                """,
+                *params,
+            )
+
+            return [
+                {
+                    "id": str(row["id"]),
+                    "user_id": row["user_id"],
+                    "proposition": row["proposition"],
+                    "choice": row["choice"],
+                    "context": row["context"],
+                    "count": row["count"],
+                    "last_used": row["last_used"],
+                }
+                for row in rows
+            ]
+
+    async def get_preferred_choice(
+        self,
+        user_id: str,
+        proposition: str,
+    ) -> str | None:
+        """Get the most preferred choice for a proposition.
+
+        Args:
+            user_id: User identifier
+            proposition: The proposition to query
+
+        Returns:
+            Most chosen option or None if no preferences
+        """
+        prefs = await self.get_preferences(user_id, proposition)
+        return prefs[0]["choice"] if prefs else None
+
+    # ==================== Sandbox Computations Operations ====================
+
+    async def set_shared(
+        self,
+        key: str,
+        value: Any,
+        computed_by: str | None = None,
+        expires_at: datetime | None = None,
+    ) -> None:
+        """Set a shared computation result.
+
+        Args:
+            key: Unique key for this computation
+            value: Result value (will be JSON serialized)
+            computed_by: Agent ID that computed this value
+            expires_at: Optional expiration time
+        """
+        agent_id = computed_by or self.agent_id or "main"
+
+        async with get_transaction() as conn:
+            await conn.execute(
+                """
+                INSERT INTO sandbox_computations
+                    (session_id, key, value, computed_by, expires_at)
+                VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT (session_id, key)
+                DO UPDATE SET
+                    value = EXCLUDED.value,
+                    computed_by = EXCLUDED.computed_by,
+                    created_at = NOW(),
+                    expires_at = EXCLUDED.expires_at
+                """,
+                self.session_id,
+                key,
+                json.dumps(value),
+                agent_id,
+                expires_at,
+            )
+
+    async def get_shared(self, key: str) -> Any | None:
+        """Get a shared computation result.
+
+        Args:
+            key: Key to retrieve
+
+        Returns:
+            Value or None if not found/expired
+        """
+        async with get_connection() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT value FROM sandbox_computations
+                WHERE session_id = $1 AND key = $2
+                AND (expires_at IS NULL OR expires_at > NOW())
+                """,
+                self.session_id,
+                key,
+            )
+            if row:
+                return json.loads(row["value"])
+            return None
+
+    async def delete_shared(self, key: str) -> bool:
+        """Delete a shared computation.
+
+        Args:
+            key: Key to delete
+
+        Returns:
+            True if deleted, False if not found
+        """
+        async with get_connection() as conn:
+            result = await conn.execute(
+                """
+                DELETE FROM sandbox_computations
+                WHERE session_id = $1 AND key = $2
+                """,
+                self.session_id,
+                key,
+            )
+            return result == "DELETE 1"
+
+    async def list_shared(self) -> list[dict[str, Any]]:
+        """List all shared computations for this session.
+
+        Returns:
+            List of computation dicts
+        """
+        async with get_connection() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT key, value, computed_by, created_at, expires_at
+                FROM sandbox_computations
+                WHERE session_id = $1
+                AND (expires_at IS NULL OR expires_at > NOW())
+                ORDER BY created_at DESC
+                """,
+                self.session_id,
+            )
+
+            return [
+                {
+                    "key": row["key"],
+                    "value": json.loads(row["value"]) if row["value"] else None,
+                    "computed_by": row["computed_by"],
+                    "created_at": row["created_at"],
+                    "expires_at": row["expires_at"],
+                }
+                for row in rows
+            ]
+
+    # ==================== Spawn Queue Operations ====================
+
+    async def request_spawn(
+        self,
+        requester_agent: str,
+        target_agent_type: str,
+        payload: dict[str, Any],
+        depth_level: int = 1,
+        priority: str = "normal",
+        depends_on: list[str] | None = None,
+    ) -> str:
+        """Request a new agent spawn.
+
+        Args:
+            requester_agent: Agent ID requesting the spawn
+            target_agent_type: Type of agent to spawn (e.g., 'kraken', 'scout')
+            payload: Task description and context
+            depth_level: Nesting depth
+            priority: Spawn priority ('low', 'normal', 'high', 'critical')
+            depends_on: List of spawn request UUIDs this depends on
+
+        Returns:
+            Spawn request UUID
+        """
+        request_id = generate_memory_id()
+        deps = depends_on or []
+        blocked_count = len(deps)
+
+        async with get_transaction() as conn:
+            await conn.execute(
+                """
+                INSERT INTO spawn_queue
+                    (id, requester_agent, target_agent_type, depth_level,
+                     priority, payload, depends_on, blocked_by_count)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                """,
+                request_id,
+                requester_agent,
+                target_agent_type,
+                depth_level,
+                priority,
+                json.dumps(payload),
+                deps,
+                blocked_count,
+            )
+
+        return request_id
+
+    async def get_ready_spawns(
+        self,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Get spawn requests ready to execute (no blockers).
+
+        Uses the partial index for O(1) lookup.
+
+        Args:
+            limit: Max requests to return
+
+        Returns:
+            List of ready spawn request dicts
+        """
+        async with get_connection() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, requester_agent, target_agent_type, depth_level,
+                       priority, status, payload, created_at, depends_on
+                FROM spawn_queue
+                WHERE status = 'pending' AND blocked_by_count = 0
+                ORDER BY
+                    CASE priority
+                        WHEN 'critical' THEN 0
+                        WHEN 'high' THEN 1
+                        WHEN 'normal' THEN 2
+                        WHEN 'low' THEN 3
+                    END,
+                    created_at ASC
+                LIMIT $1
+                """,
+                limit,
+            )
+
+            return [
+                {
+                    "id": str(row["id"]),
+                    "requester_agent": row["requester_agent"],
+                    "target_agent_type": row["target_agent_type"],
+                    "depth_level": row["depth_level"],
+                    "priority": row["priority"],
+                    "status": row["status"],
+                    "payload": json.loads(row["payload"]) if row["payload"] else {},
+                    "created_at": row["created_at"],
+                    "depends_on": row["depends_on"] or [],
+                }
+                for row in rows
+            ]
+
+    async def approve_spawn(
+        self,
+        request_id: str,
+        spawned_agent_id: str | None = None,
+    ) -> bool:
+        """Approve and optionally mark a spawn request as spawned.
+
+        Also decrements blocked_by_count for dependent requests (Kahn's algorithm).
+
+        Args:
+            request_id: Spawn request UUID
+            spawned_agent_id: UUID of the spawned agent (if already spawned)
+
+        Returns:
+            True if approved, False if not found
+        """
+        new_status = 'spawned' if spawned_agent_id else 'approved'
+
+        async with get_transaction() as conn:
+            # Update the request
+            result = await conn.execute(
+                """
+                UPDATE spawn_queue
+                SET status = $1, processed_at = NOW(), spawned_agent_id = $2
+                WHERE id = $3 AND status = 'pending'
+                """,
+                new_status,
+                spawned_agent_id,
+                request_id,
+            )
+
+            if result != "UPDATE 1":
+                return False
+
+            # Decrement blocked_by_count for requests depending on this one
+            await conn.execute(
+                """
+                UPDATE spawn_queue
+                SET blocked_by_count = blocked_by_count - 1
+                WHERE $1 = ANY(depends_on)
+                AND status = 'pending'
+                """,
+                request_id,
+            )
+
+            return True
+
+    async def reject_spawn(
+        self,
+        request_id: str,
+    ) -> bool:
+        """Reject a spawn request.
+
+        Args:
+            request_id: Spawn request UUID
+
+        Returns:
+            True if rejected, False if not found
+        """
+        async with get_connection() as conn:
+            result = await conn.execute(
+                """
+                UPDATE spawn_queue
+                SET status = 'rejected', processed_at = NOW()
+                WHERE id = $1 AND status = 'pending'
+                """,
+                request_id,
+            )
+            return result == "UPDATE 1"
+
+    async def get_spawn_queue(
+        self,
+        status: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get spawn queue entries.
+
+        Args:
+            status: Optional filter by status
+
+        Returns:
+            List of spawn request dicts
+        """
+        conditions = []
+        params: list[Any] = []
+        param_idx = 1
+
+        if status:
+            conditions.append(f"status = ${param_idx}")
+            params.append(status)
+            param_idx += 1
+
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        async with get_connection() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT id, requester_agent, target_agent_type, depth_level,
+                       priority, status, payload, created_at, processed_at,
+                       spawned_agent_id, depends_on, blocked_by_count
+                FROM spawn_queue
+                {where_clause}
+                ORDER BY created_at DESC
+                """,
+                *params,
+            )
+
+            return [
+                {
+                    "id": str(row["id"]),
+                    "requester_agent": row["requester_agent"],
+                    "target_agent_type": row["target_agent_type"],
+                    "depth_level": row["depth_level"],
+                    "priority": row["priority"],
+                    "status": row["status"],
+                    "payload": json.loads(row["payload"]) if row["payload"] else {},
+                    "created_at": row["created_at"],
+                    "processed_at": row["processed_at"],
+                    "spawned_agent_id": str(row["spawned_agent_id"]) if row["spawned_agent_id"] else None,
+                    "depends_on": row["depends_on"] or [],
+                    "blocked_by_count": row["blocked_by_count"],
+                }
+                for row in rows
+            ]
