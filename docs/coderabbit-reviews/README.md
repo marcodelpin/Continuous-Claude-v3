@@ -98,6 +98,8 @@ Generated: 2026-01-15T10:05:00+01:00
 ### Total Reviews
 113 reviews across 37 PRs
 
+> **Note**: Update counts when adding new reviews: `ls origin-pr-*.json | wc -l` and `ls fork-pr-*.json | wc -l`
+
 ## JSON Field Reference
 
 Each review JSON contains these key fields for comparison:
