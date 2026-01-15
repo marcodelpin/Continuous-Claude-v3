@@ -116,6 +116,8 @@ function main() {
     return;
   }
   const pythonCode = `
+import sys
+import asyncio
 import asyncpg
 import os
 

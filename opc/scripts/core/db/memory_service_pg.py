@@ -1668,7 +1668,7 @@ class MemoryServicePG:
             "completed_at": row["completed_at"],
             "error_message": row["error_message"],
             "result_summary": row["result_summary"],
-            "current_todos": json.loads(row["current_todos"]) if row["current_todos"] else [],
+            "current_todos": row["current_todos"] if isinstance(row["current_todos"], list) else (json.loads(row["current_todos"]) if row["current_todos"] else []),
             "last_tool": row["last_tool"],
             "last_tool_at": row["last_tool_at"],
             "handoff_to": str(row["handoff_to"]) if row["handoff_to"] else None,
@@ -1789,9 +1789,9 @@ class MemoryServicePG:
                     "message_type": row["message_type"],
                     "target_agent": row["target_agent"],
                     "priority": row["priority"],
-                    "payload": json.loads(row["payload"]) if row["payload"] else {},
+                    "payload": row["payload"] if isinstance(row["payload"], dict) else (json.loads(row["payload"]) if row["payload"] else {}),
                     "created_at": row["created_at"],
-                    "read_by": json.loads(row["read_by"]) if row["read_by"] else [],
+                    "read_by": row["read_by"] if isinstance(row["read_by"], list) else (json.loads(row["read_by"]) if row["read_by"] else []),
                 }
                 for row in rows
             ]
@@ -2465,13 +2465,16 @@ class MemoryServicePG:
     ) -> bool:
         """Reject a spawn request.
 
+        Also decrements blocked_by_count for dependent requests to prevent deadlock.
+
         Args:
             request_id: Spawn request UUID
 
         Returns:
             True if rejected, False if not found
         """
-        async with get_connection() as conn:
+        async with get_transaction() as conn:
+            # Update the request status
             result = await conn.execute(
                 """
                 UPDATE spawn_queue
@@ -2480,7 +2483,23 @@ class MemoryServicePG:
                 """,
                 request_id,
             )
-            return result == "UPDATE 1"
+
+            if result != "UPDATE 1":
+                return False
+
+            # Decrement blocked_by_count for requests depending on this one
+            # (same as approve_spawn - prevents deadlock from stuck dependents)
+            await conn.execute(
+                """
+                UPDATE spawn_queue
+                SET blocked_by_count = blocked_by_count - 1
+                WHERE $1 = ANY(depends_on)
+                AND status = 'pending'
+                """,
+                request_id,
+            )
+
+            return True
 
     async def get_spawn_queue(
         self,

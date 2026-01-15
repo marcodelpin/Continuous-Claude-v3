@@ -41,6 +41,8 @@ export function main(): void {
   // be reused when switching projects. Updating the project field ensures the
   // session is associated with the current project.
   const pythonCode = `
+import sys
+import asyncio
 import asyncpg
 import os
 
