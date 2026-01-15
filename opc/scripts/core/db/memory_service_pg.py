@@ -1813,13 +1813,19 @@ class MemoryServicePG:
         if not message_ids:
             return 0
 
-        async with get_connection() as conn:
+        # Use transaction with row locking to prevent race condition
+        # where concurrent calls could add duplicate entries to read_by
+        async with get_transaction() as conn:
             result = await conn.execute(
                 """
                 UPDATE blackboard
                 SET read_by = read_by || to_jsonb($1::text)
-                WHERE id = ANY($2::uuid[])
-                AND NOT (read_by ? $1)
+                WHERE id IN (
+                    SELECT id FROM blackboard
+                    WHERE id = ANY($2::uuid[])
+                    AND NOT (read_by ? $1)
+                    FOR UPDATE SKIP LOCKED
+                )
                 """,
                 reader_agent,
                 message_ids,
