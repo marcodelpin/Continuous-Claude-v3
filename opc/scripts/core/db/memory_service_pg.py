@@ -1391,3 +1391,561 @@ class MemoryServicePG:
             if result and result.startswith("DELETE "):
                 return int(result.split()[1])
             return 0
+
+    # ==================== Agent Operations ====================
+
+    async def register_agent(
+        self,
+        agent_id: str,
+        premise: str | None = None,
+        pattern: str | None = None,
+        role: str | None = None,
+        parent_agent_id: str | None = None,
+        depth_level: int = 1,
+        pid: int | None = None,
+        swarm_id: str | None = None,
+    ) -> str:
+        """Register a new agent in the agents table.
+
+        Args:
+            agent_id: Unique agent identifier (e.g., "kraken-abc123")
+            premise: Task description/goal for this agent
+            pattern: Multi-agent pattern (e.g., "map-reduce", "pipeline")
+            role: Role within pattern (e.g., "mapper", "reducer")
+            parent_agent_id: UUID of parent agent if spawned by another agent
+            depth_level: Nesting depth (1 = top-level)
+            pid: Process ID if running as subprocess
+            swarm_id: Optional swarm grouping for batch operations
+
+        Returns:
+            UUID of the registered agent
+        """
+        db_id = generate_memory_id()
+
+        async with get_transaction() as conn:
+            await conn.execute(
+                """
+                INSERT INTO agents
+                    (id, session_id, agent_id, premise, pattern, role,
+                     parent_agent_id, depth_level, pid, swarm_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                """,
+                db_id,
+                self.session_id,
+                agent_id,
+                premise,
+                pattern,
+                role,
+                parent_agent_id,
+                depth_level,
+                pid,
+                swarm_id or self.session_id,
+            )
+
+        return db_id
+
+    async def update_agent_status(
+        self,
+        agent_id: str,
+        status: str,
+        error_message: str | None = None,
+        result_summary: str | None = None,
+    ) -> bool:
+        """Update agent status.
+
+        Args:
+            agent_id: The agent_id (not UUID)
+            status: New status ('running', 'completed', 'failed', 'orphaned', 'killed')
+            error_message: Optional error message for failed status
+            result_summary: Optional result summary for completed status
+
+        Returns:
+            True if updated, False if agent not found
+        """
+        async with get_transaction() as conn:
+            if status in ('completed', 'failed'):
+                result = await conn.execute(
+                    """
+                    UPDATE agents
+                    SET status = $1, error_message = $2, result_summary = $3,
+                        completed_at = NOW()
+                    WHERE agent_id = $4 AND session_id = $5
+                    """,
+                    status,
+                    error_message,
+                    result_summary,
+                    agent_id,
+                    self.session_id,
+                )
+            else:
+                result = await conn.execute(
+                    """
+                    UPDATE agents
+                    SET status = $1
+                    WHERE agent_id = $2 AND session_id = $3
+                    """,
+                    status,
+                    agent_id,
+                    self.session_id,
+                )
+            return result == "UPDATE 1"
+
+    async def update_agent_observability(
+        self,
+        agent_id: str,
+        current_todos: list[dict] | None = None,
+        last_tool: str | None = None,
+        context_usage: float | None = None,
+    ) -> bool:
+        """Update agent observability fields for TUI/HUD.
+
+        Args:
+            agent_id: The agent_id (not UUID)
+            current_todos: Current todo list as JSON
+            last_tool: Name of last tool used
+            context_usage: Current context usage (0.0 to 1.0)
+
+        Returns:
+            True if updated, False if agent not found
+        """
+        updates = []
+        params: list[Any] = []
+        param_idx = 1
+
+        if current_todos is not None:
+            updates.append(f"current_todos = ${param_idx}")
+            params.append(json.dumps(current_todos))
+            param_idx += 1
+
+        if last_tool is not None:
+            updates.append(f"last_tool = ${param_idx}, last_tool_at = NOW()")
+            params.append(last_tool)
+            param_idx += 1
+
+        if context_usage is not None:
+            updates.append(f"context_usage = ${param_idx}")
+            params.append(context_usage)
+            param_idx += 1
+
+        if not updates:
+            return False
+
+        params.extend([agent_id, self.session_id])
+
+        async with get_connection() as conn:
+            result = await conn.execute(
+                f"""
+                UPDATE agents
+                SET {', '.join(updates)}
+                WHERE agent_id = ${param_idx} AND session_id = ${param_idx + 1}
+                """,
+                *params,
+            )
+            return result == "UPDATE 1"
+
+    async def get_agent(self, agent_id: str) -> dict[str, Any] | None:
+        """Get agent by agent_id.
+
+        Args:
+            agent_id: The agent_id (not UUID)
+
+        Returns:
+            Agent dict or None if not found
+        """
+        async with get_connection() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id, session_id, agent_id, parent_agent_id, premise,
+                       pattern, role, depth_level, pid, swarm_id, status,
+                       spawned_at, completed_at, error_message, result_summary,
+                       current_todos, last_tool, last_tool_at, handoff_to,
+                       context_usage
+                FROM agents
+                WHERE agent_id = $1 AND session_id = $2
+                """,
+                agent_id,
+                self.session_id,
+            )
+
+            if row is None:
+                return None
+
+            return self._row_to_agent_dict(row)
+
+    async def get_session_agents(
+        self,
+        status: str | None = None,
+        pattern: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get all agents for this session.
+
+        Args:
+            status: Optional filter by status
+            pattern: Optional filter by pattern
+
+        Returns:
+            List of agent dicts
+        """
+        conditions = ["session_id = $1"]
+        params: list[Any] = [self.session_id]
+        param_idx = 2
+
+        if status:
+            conditions.append(f"status = ${param_idx}")
+            params.append(status)
+            param_idx += 1
+
+        if pattern:
+            conditions.append(f"pattern = ${param_idx}")
+            params.append(pattern)
+
+        async with get_connection() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT id, session_id, agent_id, parent_agent_id, premise,
+                       pattern, role, depth_level, pid, swarm_id, status,
+                       spawned_at, completed_at, error_message, result_summary,
+                       current_todos, last_tool, last_tool_at, handoff_to,
+                       context_usage
+                FROM agents
+                WHERE {' AND '.join(conditions)}
+                ORDER BY spawned_at DESC
+                """,
+                *params,
+            )
+
+            return [self._row_to_agent_dict(row) for row in rows]
+
+    async def get_running_agents(self) -> list[dict[str, Any]]:
+        """Get all currently running agents in this session."""
+        return await self.get_session_agents(status='running')
+
+    async def kill_swarm(self, swarm_id: str) -> int:
+        """Mark all agents in a swarm as killed.
+
+        Args:
+            swarm_id: Swarm identifier
+
+        Returns:
+            Number of agents killed
+        """
+        async with get_connection() as conn:
+            result = await conn.execute(
+                """
+                UPDATE agents
+                SET status = 'killed', completed_at = NOW()
+                WHERE swarm_id = $1 AND session_id = $2 AND status = 'running'
+                """,
+                swarm_id,
+                self.session_id,
+            )
+            if result and result.startswith("UPDATE "):
+                return int(result.split()[1])
+            return 0
+
+    def _row_to_agent_dict(self, row) -> dict[str, Any]:
+        """Convert a database row to agent dict."""
+        return {
+            "id": str(row["id"]),
+            "session_id": row["session_id"],
+            "agent_id": row["agent_id"],
+            "parent_agent_id": str(row["parent_agent_id"]) if row["parent_agent_id"] else None,
+            "premise": row["premise"],
+            "pattern": row["pattern"],
+            "role": row["role"],
+            "depth_level": row["depth_level"],
+            "pid": row["pid"],
+            "swarm_id": row["swarm_id"],
+            "status": row["status"],
+            "spawned_at": row["spawned_at"],
+            "completed_at": row["completed_at"],
+            "error_message": row["error_message"],
+            "result_summary": row["result_summary"],
+            "current_todos": json.loads(row["current_todos"]) if row["current_todos"] else [],
+            "last_tool": row["last_tool"],
+            "last_tool_at": row["last_tool_at"],
+            "handoff_to": str(row["handoff_to"]) if row["handoff_to"] else None,
+            "context_usage": row["context_usage"],
+        }
+
+    # ==================== Blackboard Operations ====================
+
+    async def post_message(
+        self,
+        swarm_id: str,
+        sender_agent: str,
+        message_type: str,
+        payload: dict[str, Any],
+        target_agent: str | None = None,
+        priority: str = "normal",
+    ) -> str:
+        """Post a message to the blackboard.
+
+        Args:
+            swarm_id: Swarm identifier for message routing
+            sender_agent: Agent ID of the sender
+            message_type: One of 'request', 'response', 'status', 'directive', 'checkpoint'
+            payload: Message content as dict
+            target_agent: Specific recipient (None = broadcast)
+            priority: Message priority ('low', 'normal', 'high', 'critical')
+
+        Returns:
+            Message UUID
+        """
+        message_id = generate_memory_id()
+
+        async with get_transaction() as conn:
+            await conn.execute(
+                """
+                INSERT INTO blackboard
+                    (id, swarm_id, sender_agent, message_type, target_agent,
+                     priority, payload)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                """,
+                message_id,
+                swarm_id,
+                sender_agent,
+                message_type,
+                target_agent,
+                priority,
+                json.dumps(payload),
+            )
+
+        return message_id
+
+    async def read_messages(
+        self,
+        swarm_id: str,
+        reader_agent: str,
+        unread_only: bool = True,
+        message_types: list[str] | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Read messages from the blackboard.
+
+        Args:
+            swarm_id: Swarm to read from
+            reader_agent: Agent ID of the reader (for tracking read status)
+            unread_only: Only return messages not yet read by this agent
+            message_types: Optional filter by message types
+            limit: Max messages to return
+
+        Returns:
+            List of message dicts
+        """
+        conditions = ["swarm_id = $1", "archived_at IS NULL"]
+        params: list[Any] = [swarm_id]
+        param_idx = 2
+
+        # Filter for messages targeted to this agent or broadcasts
+        conditions.append(f"(target_agent IS NULL OR target_agent = ${param_idx})")
+        params.append(reader_agent)
+        param_idx += 1
+
+        if unread_only:
+            conditions.append(f"NOT (read_by ? ${param_idx})")
+            params.append(reader_agent)
+            param_idx += 1
+
+        if message_types:
+            conditions.append(f"message_type = ANY(${param_idx})")
+            params.append(message_types)
+            param_idx += 1
+
+        params.append(limit)
+
+        async with get_connection() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT id, swarm_id, sender_agent, message_type, target_agent,
+                       priority, payload, created_at, read_by
+                FROM blackboard
+                WHERE {' AND '.join(conditions)}
+                ORDER BY
+                    CASE priority
+                        WHEN 'critical' THEN 0
+                        WHEN 'high' THEN 1
+                        WHEN 'normal' THEN 2
+                        WHEN 'low' THEN 3
+                    END,
+                    created_at ASC
+                LIMIT ${param_idx}
+                """,
+                *params,
+            )
+
+            return [
+                {
+                    "id": str(row["id"]),
+                    "swarm_id": row["swarm_id"],
+                    "sender_agent": row["sender_agent"],
+                    "message_type": row["message_type"],
+                    "target_agent": row["target_agent"],
+                    "priority": row["priority"],
+                    "payload": json.loads(row["payload"]) if row["payload"] else {},
+                    "created_at": row["created_at"],
+                    "read_by": json.loads(row["read_by"]) if row["read_by"] else [],
+                }
+                for row in rows
+            ]
+
+    async def mark_messages_read(
+        self,
+        message_ids: list[str],
+        reader_agent: str,
+    ) -> int:
+        """Mark messages as read by an agent.
+
+        Args:
+            message_ids: List of message UUIDs
+            reader_agent: Agent ID that read the messages
+
+        Returns:
+            Number of messages marked as read
+        """
+        if not message_ids:
+            return 0
+
+        async with get_connection() as conn:
+            result = await conn.execute(
+                """
+                UPDATE blackboard
+                SET read_by = read_by || to_jsonb($1::text)
+                WHERE id = ANY($2::uuid[])
+                AND NOT (read_by ? $1)
+                """,
+                reader_agent,
+                message_ids,
+            )
+            if result and result.startswith("UPDATE "):
+                return int(result.split()[1])
+            return 0
+
+    async def archive_old_messages(
+        self,
+        swarm_id: str,
+        older_than_hours: int = 24,
+    ) -> int:
+        """Archive old messages from a swarm.
+
+        Args:
+            swarm_id: Swarm to clean up
+            older_than_hours: Archive messages older than this
+
+        Returns:
+            Number of messages archived
+        """
+        async with get_connection() as conn:
+            result = await conn.execute(
+                """
+                UPDATE blackboard
+                SET archived_at = NOW()
+                WHERE swarm_id = $1
+                AND archived_at IS NULL
+                AND created_at < NOW() - INTERVAL '1 hour' * $2
+                """,
+                swarm_id,
+                older_than_hours,
+            )
+            if result and result.startswith("UPDATE "):
+                return int(result.split()[1])
+            return 0
+
+    # ==================== Agent Logs Operations ====================
+
+    async def log(
+        self,
+        level: str,
+        message: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        """Write a log entry from this agent.
+
+        Args:
+            level: Log level ('debug', 'info', 'warn', 'error')
+            message: Log message
+            metadata: Optional additional metadata
+
+        Returns:
+            Log entry UUID
+        """
+        log_id = generate_memory_id()
+        agent_id = self.agent_id or "main"
+
+        async with get_transaction() as conn:
+            await conn.execute(
+                """
+                INSERT INTO agent_logs
+                    (id, agent_id, session_id, level, message, metadata)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                """,
+                log_id,
+                agent_id,
+                self.session_id,
+                level,
+                message,
+                json.dumps(metadata or {}),
+            )
+
+        return log_id
+
+    async def get_logs(
+        self,
+        level: str | None = None,
+        agent_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Get log entries for this session.
+
+        Args:
+            level: Optional filter by level
+            agent_id: Optional filter by specific agent
+            limit: Max entries to return
+
+        Returns:
+            List of log entry dicts
+        """
+        conditions = ["session_id = $1"]
+        params: list[Any] = [self.session_id]
+        param_idx = 2
+
+        if level:
+            conditions.append(f"level = ${param_idx}")
+            params.append(level)
+            param_idx += 1
+
+        if agent_id:
+            conditions.append(f"agent_id = ${param_idx}")
+            params.append(agent_id)
+            param_idx += 1
+
+        params.append(limit)
+
+        async with get_connection() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT id, agent_id, session_id, level, message, metadata, created_at
+                FROM agent_logs
+                WHERE {' AND '.join(conditions)}
+                ORDER BY created_at DESC
+                LIMIT ${param_idx}
+                """,
+                *params,
+            )
+
+            return [
+                {
+                    "id": str(row["id"]),
+                    "agent_id": row["agent_id"],
+                    "session_id": row["session_id"],
+                    "level": row["level"],
+                    "message": row["message"],
+                    "metadata": json.loads(row["metadata"]) if row["metadata"] else {},
+                    "created_at": row["created_at"],
+                }
+                for row in rows
+            ]
+
+    async def get_errors(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Get recent error logs for this session."""
+        return await self.get_logs(level='error', limit=limit)
