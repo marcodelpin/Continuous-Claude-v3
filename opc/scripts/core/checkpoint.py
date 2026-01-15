@@ -210,6 +210,9 @@ def main():
         if args.files_json:
             try:
                 files = json.loads(args.files_json)
+                if not isinstance(files, list):
+                    print("Error: --files-json must be a JSON array", file=sys.stderr)
+                    sys.exit(1)
             except json.JSONDecodeError as e:
                 print(f"Error: Invalid JSON in --files-json: {e}", file=sys.stderr)
                 sys.exit(1)
@@ -220,6 +223,9 @@ def main():
         if args.unknowns_json:
             try:
                 unknowns = json.loads(args.unknowns_json)
+                if not isinstance(unknowns, list):
+                    print("Error: --unknowns-json must be a JSON array", file=sys.stderr)
+                    sys.exit(1)
             except json.JSONDecodeError as e:
                 print(f"Error: Invalid JSON in --unknowns-json: {e}", file=sys.stderr)
                 sys.exit(1)

@@ -1,7 +1,9 @@
 # CodeRabbit Reviews Archive
 
-This directory contains all CodeRabbit reviews from PRs on both origin and fork repositories.
+This directory contains PR reviews from both origin and fork repositories.
 **Purpose**: Reference dataset for comparing code review quality across LLMs.
+
+> **Note**: Most reviews are from CodeRabbit bot, but some files may include human reviews for completeness.
 
 ## Data Structure
 
