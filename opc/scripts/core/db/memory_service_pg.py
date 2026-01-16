@@ -1781,7 +1781,8 @@ class MemoryServicePG:
         param_idx += 1
 
         if unread_only:
-            conditions.append(f"NOT (read_by ? ${param_idx})")
+            # COALESCE handles NULL read_by values
+            conditions.append(f"NOT (COALESCE(read_by, '[]'::jsonb) ? ${param_idx})")
             params.append(reader_agent)
             param_idx += 1
 

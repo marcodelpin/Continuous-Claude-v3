@@ -624,28 +624,37 @@ def parse_yaml_handoff(file_path: Path) -> dict:
     elif not isinstance(decisions, str):
         decisions = str(decisions) if decisions else ""
 
+    # Helper to ensure value is a list (handles strings that would split into chars)
+    def _as_list(value):
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str) and value:
+            return [value]
+        return []
+
     # Extract files modified (support multiple formats)
     files_modified = []
     # Direct list at top level
-    direct_files = data.get("files_modified") or data.get("files_created") or []
-    if isinstance(direct_files, list):
-        files_modified.extend(direct_files)
+    direct_files = data.get("files_modified") or data.get("files_created")
+    files_modified.extend(_as_list(direct_files))
     # Nested under "files" key
     files_data = data.get("files", {})
     if isinstance(files_data, dict):
-        files_modified.extend(files_data.get("created", []) or [])
-        files_modified.extend(files_data.get("modified", []) or [])
+        files_modified.extend(_as_list(files_data.get("created")))
+        files_modified.extend(_as_list(files_data.get("modified")))
     # Also check done_this_session for files
     done = data.get("done_this_session", [])
     if isinstance(done, list):
         for item in done:
             if isinstance(item, dict) and "files" in item:
-                files_modified.extend(item.get("files", []))
+                files_modified.extend(_as_list(item.get("files")))
 
-    # Normalize outcome
-    outcome = data.get("outcome", "UNKNOWN")
-    if outcome not in ["SUCCEEDED", "PARTIAL_PLUS", "PARTIAL_MINUS", "FAILED", "UNKNOWN"]:
-        # Map legacy status values
+    # Normalize outcome (use existing helper for case-insensitive lookup)
+    outcome_raw = data.get("outcome")
+    if outcome_raw:
+        outcome = normalize_outcome(str(outcome_raw))
+    else:
+        # Fall back to legacy status values
         status_map = {
             "complete": "SUCCEEDED",
             "partial": "PARTIAL_PLUS",
@@ -929,7 +938,9 @@ def index_single_file(conn, file_path: Path) -> bool:
 
     # Handoff files: in handoffs/ dir (.md, .yaml, .yml) OR HANDOFF.md/yaml in root
     is_handoff_dir = "handoffs" in path_str
-    is_root_handoff = file_path.name.upper().startswith("HANDOFF")
+    # Exact match for root handoff files (not just startswith)
+    root_handoff_names = {"handoff.md", "handoff.yaml", "handoff.yml"}
+    is_root_handoff = file_path.name.lower() in root_handoff_names
     is_handoff_ext = file_path.suffix in (".md", ".yaml", ".yml")
 
     if (is_handoff_dir or is_root_handoff) and is_handoff_ext:
