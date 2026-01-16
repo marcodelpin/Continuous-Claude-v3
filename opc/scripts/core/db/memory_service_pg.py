@@ -1020,6 +1020,10 @@ class MemoryServicePG:
         Returns:
             List of matching facts with scores
         """
+        # Deduplicate tags to avoid COUNT(DISTINCT) mismatch
+        if tags:
+            tags = list(dict.fromkeys(tags))
+
         async with get_connection() as conn:
             # If no tags specified, return all FTS matches
             if not tags:
