@@ -2373,7 +2373,8 @@ class MemoryServicePG:
             Spawn request UUID
         """
         request_id = generate_memory_id()
-        deps = depends_on or []
+        # Deduplicate to avoid inflated blocked_count
+        deps = list(dict.fromkeys(depends_on or []))
         blocked_count = len(deps)
 
         async with get_transaction() as conn:

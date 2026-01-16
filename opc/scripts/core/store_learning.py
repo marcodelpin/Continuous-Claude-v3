@@ -177,10 +177,17 @@ async def store_learning_v2(
     except Exception as e:
         return {"success": False, "error": str(e)}
     finally:
+        # Guard cleanup to avoid masking the function's error return
         if embedder:
-            await embedder.aclose()
+            try:
+                await embedder.aclose()
+            except Exception:
+                pass
         if memory:
-            await memory.close()
+            try:
+                await memory.close()
+            except Exception:
+                pass
 
 
 async def store_learning(
@@ -276,10 +283,17 @@ async def store_learning(
     except Exception as e:
         return {"success": False, "error": str(e)}
     finally:
+        # Guard cleanup to avoid masking the function's error return
         if embedder:
-            await embedder.aclose()
+            try:
+                await embedder.aclose()
+            except Exception:
+                pass
         if memory:
-            await memory.close()
+            try:
+                await memory.close()
+            except Exception:
+                pass
 
 
 async def main():

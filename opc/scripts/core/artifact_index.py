@@ -565,13 +565,18 @@ def parse_yaml_handoff(file_path: Path) -> dict:
         if raw_content.startswith('---'):
             parts = raw_content.split('---', 2)
             if len(parts) >= 3:
-                frontmatter = yaml.safe_load(parts[1]) or {}
-                body = yaml.safe_load(parts[2]) or {}
+                frontmatter = yaml.safe_load(parts[1])
+                body = yaml.safe_load(parts[2])
+                # Ensure both are dicts before merging
+                frontmatter = frontmatter if isinstance(frontmatter, dict) else {}
+                body = body if isinstance(body, dict) else {}
                 data = {**frontmatter, **body}
             else:
-                data = yaml.safe_load(raw_content) or {}
+                parsed = yaml.safe_load(raw_content)
+                data = parsed if isinstance(parsed, dict) else {}
         else:
-            data = yaml.safe_load(raw_content) or {}
+            parsed = yaml.safe_load(raw_content)
+            data = parsed if isinstance(parsed, dict) else {}
     except yaml.YAMLError as e:
         print(f"YAML parse error in {file_path}: {e}")
         data = {}
@@ -602,7 +607,7 @@ def parse_yaml_handoff(file_path: Path) -> dict:
     elif not isinstance(failed, str):
         failed = str(failed) if failed else ""
 
-    # Extract decisions as text
+    # Extract decisions as text (ensure always string for DB)
     decisions = data.get("decisions", [])
     if isinstance(decisions, list):
         decision_lines = []
@@ -613,6 +618,11 @@ def parse_yaml_handoff(file_path: Path) -> dict:
             else:
                 decision_lines.append(f"- {d}")
         decisions = "\n".join(decision_lines)
+    elif isinstance(decisions, dict):
+        # Handle dict format: {key: value, ...}
+        decisions = "\n".join(f"- {k}: {v}" for k, v in decisions.items())
+    elif not isinstance(decisions, str):
+        decisions = str(decisions) if decisions else ""
 
     # Extract files modified (support multiple formats)
     files_modified = []
