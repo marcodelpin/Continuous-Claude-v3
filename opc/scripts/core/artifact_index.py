@@ -27,6 +27,8 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
+import yaml
+
 # Load .env files for DATABASE_URL (cross-platform)
 try:
     from dotenv import load_dotenv
@@ -93,9 +95,11 @@ def init_sqlite(db_path: Path) -> sqlite3.Connection:
 # =============================================================================
 
 def pg_connect():
-    """Connect to PostgreSQL."""
+    """Connect to PostgreSQL with UTF-8 encoding."""
     import psycopg2
-    return psycopg2.connect(get_postgres_url())
+    conn = psycopg2.connect(get_postgres_url())
+    conn.set_client_encoding('UTF8')
+    return conn
 
 
 def init_postgres():
@@ -266,6 +270,7 @@ def _adapt_for_postgres(sql: str, params: tuple, table_hint: str) -> tuple:
              key_decisions, outcome, root_span_id, session_id)
             VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (file_path) DO UPDATE SET
+                session_name = EXCLUDED.session_name,
                 goal = EXCLUDED.goal,
                 what_worked = EXCLUDED.what_worked,
                 what_failed = EXCLUDED.what_failed,
@@ -471,17 +476,43 @@ def parse_handoff(file_path: Path) -> dict:
     status = frontmatter.get("status", "UNKNOWN")
     outcome = normalize_outcome(status)
 
+    # Flexible section name mapping (support multiple formats)
+    def get_section(*keys):
+        """Get first matching section from multiple possible key names."""
+        for key in keys:
+            if key in sections and sections[key].strip():
+                return sections[key]
+        return ""
+
+    # Extract title from h1 if present
+    h1_match = re.search(r"^#\s+(.+?)(?:\s*-\s*|\n)", content, re.MULTILINE)
+    title_from_h1 = h1_match.group(1).strip() if h1_match else ""
+
+    # Build task_summary from available sources
+    task_summary = get_section(
+        "what_was_done", "summary", "task_summary",
+        "current_focus", "goal", "objective"
+    )
+    if not task_summary and title_from_h1:
+        task_summary = title_from_h1
+
     return {
         "id": file_id,
-        "session_name": session_name,
+        "session_name": session_name or title_from_h1,
         "session_uuid": session_uuid,  # UUID suffix from directory name (if present)
         "task_number": task_number,
         "file_path": str(file_path),
-        "task_summary": sections.get("what_was_done", sections.get("summary", ""))[:500],
-        "what_worked": sections.get("what_worked", ""),
-        "what_failed": sections.get("what_failed", ""),
-        "key_decisions": sections.get("key_decisions", sections.get("decisions", "")),
-        "files_modified": json.dumps(extract_files(sections.get("files_modified", ""))),
+        "task_summary": task_summary[:500],
+        "what_worked": get_section(
+            "what_worked", "completed_this_session", "completed", "done"
+        ),
+        "what_failed": get_section("what_failed", "issues", "problems", "blockers"),
+        "key_decisions": get_section(
+            "key_decisions", "decisions", "key_choices", "choices"
+        ),
+        "files_modified": json.dumps(extract_files(
+            get_section("files_modified", "files", "key_files", "modified_files")
+        )),
         "outcome": outcome,
         # Braintrust trace links
         "root_span_id": frontmatter.get("root_span_id", ""),
@@ -506,16 +537,186 @@ def extract_files(content: str) -> list:
     return files
 
 
-def index_handoffs(conn, base_path: Path = Path("thoughts/shared/handoffs")):
-    """Index all handoffs into the database."""
-    if not base_path.exists():
-        print(f"Handoffs directory not found: {base_path}")
-        return 0
+def parse_yaml_handoff(file_path: Path) -> dict:
+    """Parse a YAML handoff file into structured data compatible with parse_handoff output.
 
+    YAML format (from /create_handoff skill):
+    ---
+    session: session-name
+    date: YYYY-MM-DD
+    status: complete|partial|blocked
+    outcome: SUCCEEDED|PARTIAL_PLUS|PARTIAL_MINUS|FAILED
+    ---
+    goal: What this session accomplished
+    now: What next session should do
+    done_this_session: [...]
+    worked: [...]
+    failed: [...]
+    decisions: [...]
+    files:
+      created: [...]
+      modified: [...]
+    """
+    raw_content = file_path.read_text()
+
+    # Parse YAML (handles frontmatter and body together)
+    try:
+        # Split frontmatter from body if present
+        if raw_content.startswith('---'):
+            parts = raw_content.split('---', 2)
+            if len(parts) >= 3:
+                frontmatter = yaml.safe_load(parts[1])
+                body = yaml.safe_load(parts[2])
+                # Ensure both are dicts before merging
+                frontmatter = frontmatter if isinstance(frontmatter, dict) else {}
+                body = body if isinstance(body, dict) else {}
+                data = {**frontmatter, **body}
+            else:
+                parsed = yaml.safe_load(raw_content)
+                data = parsed if isinstance(parsed, dict) else {}
+        else:
+            parsed = yaml.safe_load(raw_content)
+            data = parsed if isinstance(parsed, dict) else {}
+    except yaml.YAMLError as e:
+        print(f"YAML parse error in {file_path}: {e}")
+        data = {}
+
+    # Generate ID from file path
+    file_id = hashlib.md5(str(file_path).encode()).hexdigest()[:12]
+
+    # Extract session name from data or path
+    session_name = data.get("session", "")
+    if not session_name:
+        # Try to extract from path like .../handoffs/session-name/file.yaml
+        parts = file_path.parts
+        if "handoffs" in parts:
+            idx = parts.index("handoffs")
+            if idx + 1 < len(parts) - 1:  # There's a directory after handoffs
+                session_name = parts[idx + 1]
+
+    # Extract worked/failed as text (support multiple key names)
+    worked = data.get("worked") or data.get("what_worked") or []
+    if isinstance(worked, list):
+        worked = "\n".join(f"- {item}" for item in worked)
+    elif not isinstance(worked, str):
+        worked = str(worked) if worked else ""
+
+    failed = data.get("failed") or data.get("what_failed") or []
+    if isinstance(failed, list):
+        failed = "\n".join(f"- {item}" for item in failed)
+    elif not isinstance(failed, str):
+        failed = str(failed) if failed else ""
+
+    # Extract decisions as text (ensure always string for DB)
+    decisions = data.get("decisions", [])
+    if isinstance(decisions, list):
+        decision_lines = []
+        for d in decisions:
+            if isinstance(d, dict):
+                for k, v in d.items():
+                    decision_lines.append(f"- {k}: {v}")
+            else:
+                decision_lines.append(f"- {d}")
+        decisions = "\n".join(decision_lines)
+    elif isinstance(decisions, dict):
+        # Handle dict format: {key: value, ...}
+        decisions = "\n".join(f"- {k}: {v}" for k, v in decisions.items())
+    elif not isinstance(decisions, str):
+        decisions = str(decisions) if decisions else ""
+
+    # Helper to ensure value is a list (handles strings that would split into chars)
+    def _as_list(value):
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str) and value:
+            return [value]
+        return []
+
+    # Extract files modified (support multiple formats)
+    files_modified = []
+    # Direct list at top level
+    direct_files = data.get("files_modified") or data.get("files_created")
+    files_modified.extend(_as_list(direct_files))
+    # Nested under "files" key
+    files_data = data.get("files", {})
+    if isinstance(files_data, dict):
+        files_modified.extend(_as_list(files_data.get("created")))
+        files_modified.extend(_as_list(files_data.get("modified")))
+    # Also check done_this_session for files
+    done = data.get("done_this_session", [])
+    if isinstance(done, list):
+        for item in done:
+            if isinstance(item, dict) and "files" in item:
+                files_modified.extend(_as_list(item.get("files")))
+
+    # Normalize outcome (use existing helper for case-insensitive lookup)
+    outcome_raw = data.get("outcome")
+    if outcome_raw:
+        outcome = normalize_outcome(str(outcome_raw))
+    else:
+        # Fall back to legacy status values
+        status_map = {
+            "complete": "SUCCEEDED",
+            "partial": "PARTIAL_PLUS",
+            "blocked": "FAILED",
+        }
+        outcome = status_map.get(data.get("status", "").lower(), "UNKNOWN")
+
+    return {
+        "id": file_id,
+        "session_name": session_name,
+        "session_uuid": "",  # Not used in YAML format
+        "task_number": None,  # Not used in YAML format
+        "file_path": str(file_path),
+        "task_summary": data.get("goal", ""),  # goal -> task_summary for compat
+        "what_worked": worked,
+        "what_failed": failed,
+        "key_decisions": decisions,
+        "files_modified": json.dumps(files_modified),
+        "outcome": outcome,
+        "root_span_id": data.get("root_span_id", ""),
+        "turn_span_id": "",  # Not used in YAML format
+        "session_id": data.get("session_id", ""),
+        "braintrust_session_id": "",  # Not used in YAML format
+        "created_at": str(data.get("date", datetime.now().strftime("%Y-%m-%d"))),
+    }
+
+
+def index_handoffs(conn, base_path: Path = Path("thoughts/shared/handoffs"), project_root: Path = Path(".")):
+    """Index all handoffs into the database (supports .md, .yaml, .yml).
+
+    Looks in:
+    - base_path (default: thoughts/shared/handoffs) for all handoff files
+    - project_root for HANDOFF.md, HANDOFF.yaml, HANDOFF.yml
+    """
     count = 0
-    for handoff_file in base_path.rglob("*.md"):
+    handoff_files = []
+
+    # Collect from handoffs directory if it exists
+    if base_path.exists():
+        handoff_files.extend(base_path.rglob("*.md"))
+        handoff_files.extend(base_path.rglob("*.yaml"))
+        handoff_files.extend(base_path.rglob("*.yml"))
+    else:
+        print(f"Handoffs directory not found: {base_path}")
+
+    # Also check for HANDOFF.* in project root
+    for ext in (".md", ".yaml", ".yml"):
+        root_handoff = project_root / f"HANDOFF{ext}"
+        if root_handoff.exists():
+            handoff_files.append(root_handoff)
+        # Also check lowercase
+        root_handoff_lower = project_root / f"handoff{ext}"
+        if root_handoff_lower.exists():
+            handoff_files.append(root_handoff_lower)
+
+    for handoff_file in handoff_files:
         try:
-            data = parse_handoff(handoff_file)
+            # Use appropriate parser based on extension
+            if handoff_file.suffix in (".yaml", ".yml"):
+                data = parse_yaml_handoff(handoff_file)
+            else:
+                data = parse_handoff(handoff_file)
             db_execute(
                 conn,
                 """
@@ -735,9 +936,20 @@ def index_single_file(conn, file_path: Path) -> bool:
     # Determine file type based on path
     path_str = str(file_path)
 
-    if "handoffs" in path_str and file_path.suffix == ".md":
+    # Handoff files: in handoffs/ dir (.md, .yaml, .yml) OR HANDOFF.md/yaml in root
+    is_handoff_dir = "handoffs" in path_str
+    # Exact match for root handoff files (not just startswith)
+    root_handoff_names = {"handoff.md", "handoff.yaml", "handoff.yml"}
+    is_root_handoff = file_path.name.lower() in root_handoff_names
+    is_handoff_ext = file_path.suffix in (".md", ".yaml", ".yml")
+
+    if (is_handoff_dir or is_root_handoff) and is_handoff_ext:
         try:
-            data = parse_handoff(file_path)
+            # Use appropriate parser based on extension
+            if file_path.suffix in (".yaml", ".yml"):
+                data = parse_yaml_handoff(file_path)
+            else:
+                data = parse_handoff(file_path)
             db_execute(
                 conn,
                 """

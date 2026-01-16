@@ -483,7 +483,7 @@ class MemoryServicePG:
                 {
                     "id": row["id"],
                     "content": row["content"],
-                    "metadata": json.loads(row["metadata"]) if row["metadata"] else {},
+                    "metadata": self._safe_json_loads(row["metadata"], {}),
                     "created_at": row["created_at"],
                     "rank": row["rank"],
                 }
@@ -554,7 +554,7 @@ class MemoryServicePG:
                 {
                     "id": row["id"],
                     "content": row["content"],
-                    "metadata": json.loads(row["metadata"]) if row["metadata"] else {},
+                    "metadata": self._safe_json_loads(row["metadata"], {}),
                     "created_at": row["created_at"],
                     "similarity": row["similarity"],
                 }
@@ -616,7 +616,7 @@ class MemoryServicePG:
                 {
                     "id": row["id"],
                     "content": row["content"],
-                    "metadata": json.loads(row["metadata"]) if row["metadata"] else {},
+                    "metadata": self._safe_json_loads(row["metadata"], {}),
                     "created_at": row["created_at"],
                     "similarity": row["similarity"],
                 }
@@ -672,7 +672,7 @@ class MemoryServicePG:
                 {
                     "id": row["id"],
                     "content": row["content"],
-                    "metadata": json.loads(row["metadata"]) if row["metadata"] else {},
+                    "metadata": self._safe_json_loads(row["metadata"], {}),
                     "created_at": row["created_at"],
                     "similarity": row["similarity"],
                 }
@@ -778,7 +778,7 @@ class MemoryServicePG:
                 {
                     "id": row["id"],
                     "content": row["content"],
-                    "metadata": json.loads(row["metadata"]) if row["metadata"] else {},
+                    "metadata": self._safe_json_loads(row["metadata"], {}),
                     "created_at": row["created_at"],
                     "text_rank": row["text_rank"],
                     "similarity": row["similarity"],
@@ -875,7 +875,7 @@ class MemoryServicePG:
                 {
                     "id": row["id"],
                     "content": row["content"],
-                    "metadata": json.loads(row["metadata"]) if row["metadata"] else {},
+                    "metadata": self._safe_json_loads(row["metadata"], {}),
                     "created_at": row["created_at"],
                     "rrf_score": float(row["rrf_score"]),
                 }
@@ -1020,6 +1020,10 @@ class MemoryServicePG:
         Returns:
             List of matching facts with scores
         """
+        # Deduplicate tags to avoid COUNT(DISTINCT) mismatch
+        if tags:
+            tags = list(dict.fromkeys(tags))
+
         async with get_connection() as conn:
             # If no tags specified, return all FTS matches
             if not tags:
@@ -1114,7 +1118,7 @@ class MemoryServicePG:
                 {
                     "id": str(row["id"]),
                     "content": row["content"],
-                    "metadata": json.loads(row["metadata"]) if row["metadata"] else {},
+                    "metadata": self._safe_json_loads(row["metadata"], {}),
                     "created_at": row["created_at"],
                     "score": float(row["score"]),
                 }
@@ -1777,7 +1781,8 @@ class MemoryServicePG:
         param_idx += 1
 
         if unread_only:
-            conditions.append(f"NOT (read_by ? ${param_idx})")
+            # COALESCE handles NULL read_by values
+            conditions.append(f"NOT (COALESCE(read_by, '[]'::jsonb) ? ${param_idx})")
             params.append(reader_agent)
             param_idx += 1
 
@@ -1816,7 +1821,7 @@ class MemoryServicePG:
                     "message_type": row["message_type"],
                     "target_agent": row["target_agent"],
                     "priority": row["priority"],
-                    "payload": row["payload"] if isinstance(row["payload"], dict) else (json.loads(row["payload"]) if row["payload"] else {}),
+                    "payload": row["payload"] if isinstance(row["payload"], dict) else (self._safe_json_loads(row["payload"], {})),
                     "created_at": row["created_at"],
                     "read_by": row["read_by"] if isinstance(row["read_by"], list) else (json.loads(row["read_by"]) if row["read_by"] else []),
                 }
@@ -1980,7 +1985,7 @@ class MemoryServicePG:
                     "session_id": row["session_id"],
                     "level": row["level"],
                     "message": row["message"],
-                    "metadata": json.loads(row["metadata"]) if row["metadata"] else {},
+                    "metadata": self._safe_json_loads(row["metadata"], {}),
                     "created_at": row["created_at"],
                 }
                 for row in rows
@@ -2112,7 +2117,7 @@ class MemoryServicePG:
                     "source_turn": row["source_turn"],
                     "created_at": row["created_at"],
                     "expires_at": row["expires_at"],
-                    "metadata": json.loads(row["metadata"]) if row["metadata"] else {},
+                    "metadata": self._safe_json_loads(row["metadata"], {}),
                 }
                 for row in rows
             ]
@@ -2296,7 +2301,7 @@ class MemoryServicePG:
                 key,
             )
             if row:
-                return json.loads(row["value"])
+                return self._safe_json_loads(row["value"], None)
             return None
 
     async def delete_shared(self, key: str) -> bool:
@@ -2340,7 +2345,7 @@ class MemoryServicePG:
             return [
                 {
                     "key": row["key"],
-                    "value": json.loads(row["value"]) if row["value"] else None,
+                    "value": self._safe_json_loads(row["value"], None),
                     "computed_by": row["computed_by"],
                     "created_at": row["created_at"],
                     "expires_at": row["expires_at"],
@@ -2373,7 +2378,8 @@ class MemoryServicePG:
             Spawn request UUID
         """
         request_id = generate_memory_id()
-        deps = depends_on or []
+        # Deduplicate to avoid inflated blocked_count
+        deps = list(dict.fromkeys(depends_on or []))
         blocked_count = len(deps)
 
         async with get_transaction() as conn:
@@ -2438,7 +2444,7 @@ class MemoryServicePG:
                     "depth_level": row["depth_level"],
                     "priority": row["priority"],
                     "status": row["status"],
-                    "payload": json.loads(row["payload"]) if row["payload"] else {},
+                    "payload": self._safe_json_loads(row["payload"], {}),
                     "created_at": row["created_at"],
                     "depends_on": row["depends_on"] or [],
                 }
@@ -2578,7 +2584,7 @@ class MemoryServicePG:
                     "depth_level": row["depth_level"],
                     "priority": row["priority"],
                     "status": row["status"],
-                    "payload": json.loads(row["payload"]) if row["payload"] else {},
+                    "payload": self._safe_json_loads(row["payload"], {}),
                     "created_at": row["created_at"],
                     "processed_at": row["processed_at"],
                     "spawned_agent_id": str(row["spawned_agent_id"]) if row["spawned_agent_id"] else None,
