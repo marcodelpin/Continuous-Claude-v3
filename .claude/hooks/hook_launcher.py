@@ -42,8 +42,36 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import Any
+
+
+def read_stdin_with_timeout(timeout: float = 2.0) -> str:
+    """Read stdin with timeout - prevents hanging on Windows.
+
+    On Windows, stdin.read() can block indefinitely if the pipe isn't
+    properly closed by the parent process. This uses a thread with
+    timeout to prevent that.
+
+    Args:
+        timeout: Maximum seconds to wait for stdin data
+
+    Returns:
+        stdin content or empty string if timeout
+    """
+    result = {"data": ""}
+
+    def read_thread():
+        try:
+            result["data"] = sys.stdin.read()
+        except Exception:
+            pass
+
+    thread = threading.Thread(target=read_thread, daemon=True)
+    thread.start()
+    thread.join(timeout=timeout)
+    return result["data"]
 
 
 def expand_path(path: str) -> str:
@@ -359,9 +387,9 @@ def main() -> None:
     if "CLAUDE_PPID" not in env_vars and os.getppid():
         env_vars["CLAUDE_PPID"] = str(os.getppid())
 
-    # Read stdin
+    # Read stdin with timeout (prevents hanging on Windows)
     try:
-        stdin_data = sys.stdin.read()
+        stdin_data = read_stdin_with_timeout(timeout=2.0)
         input_json = json.loads(stdin_data) if stdin_data.strip() else {}
     except json.JSONDecodeError:
         input_json = {}

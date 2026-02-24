@@ -1098,6 +1098,14 @@ async def run_setup_wizard() -> None:
         console.print("  Skipped TLDR installation")
         console.print("  [dim]Install later with: uv tool install llm-tldr[/dim]")
 
+        # Ask to disable hooks since they are pre-configured in settings.json
+        if Confirm.ask("\n  Disable TLDR hooks in settings.json? (Avoids crashes if TLDR missing)", default=False):
+            settings_path = get_global_claude_dir() / "settings.json"
+            if settings_path.exists():
+                from scripts.setup.claude_integration import strip_tldr_hooks_from_settings
+                if strip_tldr_hooks_from_settings(settings_path):
+                    console.print("  [green]OK[/green] TLDR hooks disabled")
+
     # Step 10: Diagnostics Tools (Shift-Left Feedback)
     console.print("\n[bold]Step 11/13: Diagnostics Tools (Shift-Left Feedback)[/bold]")
     console.print("  Claude gets immediate type/lint feedback after editing files.")
@@ -1290,8 +1298,96 @@ async def run_setup_wizard() -> None:
     console.print("  2. View docs: [bold]docs/QUICKSTART.md[/bold]")
 
 
+async def run_uninstall_wizard() -> None:
+    """Run the uninstall wizard to remove OPC and restore backup."""
+    from scripts.setup.claude_integration import (
+        find_latest_backup,
+        get_global_claude_dir,
+        uninstall_opc_integration,
+        PRESERVE_FILES,
+        PRESERVE_DIRS,
+    )
+
+    console.print(
+        Panel.fit("[bold]CLAUDE CONTINUITY KIT v3 - UNINSTALL[/bold]", border_style="red")
+    )
+
+    global_claude = get_global_claude_dir()
+    backup = find_latest_backup(global_claude) if global_claude.exists() else None
+
+    console.print("\n[bold]Current state:[/bold]")
+    if global_claude.exists():
+        console.print(f"  ~/.claude exists at: {global_claude}")
+    else:
+        console.print("  [dim]No ~/.claude found[/dim]")
+
+    if backup:
+        console.print(f"  Backup available: {backup.name}")
+    else:
+        console.print("  [yellow]No backup found[/yellow] - uninstall will be clean (no restore)")
+
+    # Show what user data will be preserved
+    existing_preserve = []
+    if global_claude.exists():
+        for f in PRESERVE_FILES:
+            if (global_claude / f).exists():
+                existing_preserve.append(f)
+        for d in PRESERVE_DIRS:
+            if (global_claude / d).exists():
+                existing_preserve.append(f"{d}/")
+
+    console.print("\n[bold]This will:[/bold]")
+    console.print("  1. Move current ~/.claude to ~/.claude-v3.archived.<timestamp>")
+    if backup:
+        console.print(f"  2. Restore from {backup.name}")
+    else:
+        console.print("  2. Create empty ~/.claude")
+    if existing_preserve:
+        console.print(f"  3. [green]Preserve your data:[/green] {', '.join(existing_preserve)}")
+
+    if not Confirm.ask("\nProceed with uninstall?", default=False):
+        console.print("[yellow]Uninstall cancelled.[/yellow]")
+        return
+
+    result = uninstall_opc_integration(is_global=True)
+
+    if result["success"]:
+        console.print(f"\n[green]SUCCESS[/green]\n{result['message']}")
+    else:
+        console.print(f"\n[red]FAILED[/red]\n{result['message']}")
+
+
 async def main():
     """Entry point for the setup wizard."""
+    # Check for --uninstall flag
+    if len(sys.argv) > 1 and sys.argv[1] in ("--uninstall", "-u", "uninstall"):
+        try:
+            await run_uninstall_wizard()
+        except KeyboardInterrupt:
+            console.print("\n\n[yellow]Uninstall cancelled.[/yellow]")
+            sys.exit(130)
+        return
+
+    # Show menu if no args
+    if len(sys.argv) == 1:
+        console.print(
+            Panel.fit("[bold]CLAUDE CONTINUITY KIT v3[/bold]", border_style="blue")
+        )
+        console.print("\n[bold]Options:[/bold]")
+        console.print("  [bold]1[/bold] - Install / Update")
+        console.print("  [bold]2[/bold] - Uninstall (restore backup)")
+        console.print("  [bold]q[/bold] - Quit")
+
+        choice = Prompt.ask("\nChoice", choices=["1", "2", "q"], default="1")
+
+        if choice == "q":
+            console.print("[dim]Goodbye![/dim]")
+            return
+        elif choice == "2":
+            await run_uninstall_wizard()
+            return
+        # choice == "1" falls through to install
+
     try:
         await run_setup_wizard()
     except KeyboardInterrupt:

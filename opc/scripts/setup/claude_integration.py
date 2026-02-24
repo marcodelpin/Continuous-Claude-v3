@@ -206,14 +206,14 @@ def analyze_conflicts(
         else:
             report.mergeable_rules.append(rule.name)
 
-    # Get OPC MCP names from settings.json
-    opc_settings_path = opc_source / "settings.json"
+    # Get OPC MCP names from mcp_config.json (not settings.json)
+    opc_mcp_config_path = opc_source / "mcp_config.json"
     opc_mcp_names = set()
-    if opc_settings_path.exists():
+    if opc_mcp_config_path.exists():
         try:
-            opc_settings = json.loads(opc_settings_path.read_text())
-            if "mcpServers" in opc_settings:
-                opc_mcp_names = set(opc_settings["mcpServers"].keys())
+            opc_mcp_config = json.loads(opc_mcp_config_path.read_text())
+            if "mcpServers" in opc_mcp_config:
+                opc_mcp_names = set(opc_mcp_config["mcpServers"].keys())
         except (json.JSONDecodeError, OSError):
             pass
 
@@ -678,6 +678,111 @@ def install_opc_integration_symlink(
     return result
 
 
+def strip_tldr_hooks_from_settings(settings_path: Path) -> bool:
+    """Remove TLDR hooks from settings.json file.
+
+    Removes:
+    - PreToolUse:Read -> tldr-read-enforcer.mjs
+    - PreToolUse:Grep -> smart-search-router.mjs
+    - PreToolUse:Task -> tldr-context-inject.mjs (keeps other Task hooks)
+    - SessionStart:startup|resume -> session-start-tldr-cache.mjs
+
+    Args:
+        settings_path: Path to settings.json file
+
+    Returns:
+        True if successfully modified, False otherwise
+    """
+    if not settings_path.exists():
+        return False
+
+    try:
+        settings = json.loads(settings_path.read_text())
+
+        if "hooks" not in settings:
+            return True
+
+        modified = False
+
+        # Strip PreToolUse hooks
+        if "PreToolUse" in settings["hooks"]:
+            new_pretooluse = []
+            for hook_group in settings["hooks"]["PreToolUse"]:
+                matcher = hook_group.get("matcher")
+
+                # Remove entire Read hook group (only has tldr-read-enforcer)
+                if matcher == "Read":
+                    hooks = hook_group.get("hooks", [])
+                    if any("tldr-read-enforcer" in h.get("command", "") for h in hooks):
+                        modified = True
+                        continue  # Skip this entire group
+
+                # Remove entire Grep hook group (only has smart-search-router)
+                elif matcher == "Grep":
+                    hooks = hook_group.get("hooks", [])
+                    if any("smart-search-router" in h.get("command", "") for h in hooks):
+                        modified = True
+                        continue  # Skip this entire group
+
+                # For Task hooks, remove only tldr-context-inject, keep others
+                elif matcher == "Task":
+                    hooks = hook_group.get("hooks", [])
+                    new_hooks = [
+                        h for h in hooks if "tldr-context-inject" not in h.get("command", "")
+                    ]
+                    if len(new_hooks) != len(hooks):
+                        modified = True
+                        hook_group["hooks"] = new_hooks
+                    if new_hooks:  # Only keep if there are remaining hooks
+                        new_pretooluse.append(hook_group)
+                    elif len(hooks) > 0:  # Had hooks, but all were removed
+                        continue  # Skip this group entirely
+                    else:
+                        new_pretooluse.append(hook_group)
+                else:
+                    new_pretooluse.append(hook_group)
+
+            settings["hooks"]["PreToolUse"] = new_pretooluse
+
+        # Strip SessionStart hooks
+        if "SessionStart" in settings["hooks"]:
+            new_sessionstart = []
+            for hook_group in settings["hooks"]["SessionStart"]:
+                matcher = hook_group.get("matcher", "")
+
+                # For startup|resume matcher, remove tldr-cache hook
+                if "startup" in matcher or "resume" in matcher:
+                    hooks = hook_group.get("hooks", [])
+                    new_hooks = [
+                        h
+                        for h in hooks
+                        if "session-start-tldr-cache" not in h.get("command", "")
+                    ]
+                    if len(new_hooks) != len(hooks):
+                        modified = True
+                        hook_group["hooks"] = new_hooks
+                    if new_hooks:  # Only keep if there are remaining hooks
+                        new_sessionstart.append(hook_group)
+                    elif len(hooks) > 0:  # Had hooks but all removed
+                        continue
+                    else:
+                        new_sessionstart.append(hook_group)
+                else:
+                    new_sessionstart.append(hook_group)
+
+            settings["hooks"]["SessionStart"] = new_sessionstart
+
+        # Write back if modified
+        if modified:
+            settings_path.write_text(json.dumps(settings, indent=2))
+
+        return True
+
+    except Exception:
+        return False
+
+
+
 def get_platform_info() -> dict[str, str]:
     """Get current platform information.
 
@@ -689,3 +794,143 @@ def get_platform_info() -> dict[str, str]:
         "release": platform.release(),
         "machine": platform.machine(),
     }
+
+
+def find_latest_backup(claude_dir: Path) -> Path | None:
+    """Find the most recent .claude.backup.* directory.
+
+    Args:
+        claude_dir: Path to current .claude directory
+
+    Returns:
+        Path to most recent backup, or None if no backups found
+    """
+    parent = claude_dir.parent
+    backups = sorted(parent.glob(".claude.backup.*"), reverse=True)
+    return backups[0] if backups else None
+
+
+# Files to preserve during uninstall (user data accumulated since install)
+PRESERVE_FILES = [
+    "history.jsonl",      # Command history
+    "mcp_config.json",    # MCP server configs
+    ".env",               # API keys and settings
+    "projects.json",      # Project configs
+]
+
+PRESERVE_DIRS = [
+    "file-history",       # File edit history
+    "projects",           # Project-specific data
+]
+
+
+def uninstall_opc_integration(
+    project_dir: Path | None = None,
+    is_global: bool = False,
+) -> dict[str, Any]:
+    """Uninstall OPC integration and restore from backup.
+
+    This function:
+    1. Archives current .claude to .claude-v3.archived.<timestamp>
+    2. Restores from the most recent .claude.backup.* if available
+    3. Preserves user data (history, MCP configs, etc.) by copying to restored dir
+
+    Args:
+        project_dir: Project directory (uses cwd if None)
+        is_global: If True, operate on global ~/.claude
+
+    Returns:
+        dict with keys:
+            - success: bool
+            - archived_to: Path where current .claude was moved
+            - restored_from: Path that was restored (or None)
+            - preserved: List of preserved files/dirs
+            - message: Human-readable summary
+    """
+    if is_global:
+        claude_dir = get_global_claude_dir()
+    else:
+        claude_dir = get_claude_dir(project_dir)
+
+    result: dict[str, Any] = {
+        "success": False,
+        "archived_to": None,
+        "restored_from": None,
+        "preserved": [],
+        "message": "",
+    }
+
+    if not claude_dir.exists():
+        result["message"] = "No .claude directory found - nothing to uninstall"
+        result["success"] = True
+        return result
+
+    # Step 1: Collect files to preserve BEFORE archiving
+    preserved_data: dict[str, Path] = {}
+    for filename in PRESERVE_FILES:
+        src = claude_dir / filename
+        if src.exists():
+            preserved_data[filename] = src
+    for dirname in PRESERVE_DIRS:
+        src = claude_dir / dirname
+        if src.exists() and src.is_dir():
+            preserved_data[dirname] = src
+
+    # Step 2: Archive current .claude
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    archive_path = claude_dir.parent / f".claude-v3.archived.{timestamp}"
+
+    try:
+        shutil.move(str(claude_dir), str(archive_path))
+        result["archived_to"] = archive_path
+    except Exception as e:
+        result["message"] = f"Failed to archive current .claude: {e}"
+        return result
+
+    # Step 3: Find and restore from backup
+    backup = find_latest_backup(archive_path.parent / ".claude")
+    if backup is None:
+        backup = find_latest_backup(archive_path)
+
+    if backup and backup.exists():
+        try:
+            shutil.copytree(backup, claude_dir)
+            result["restored_from"] = backup
+        except Exception as e:
+            result["message"] = (
+                f"Archived v3 to {archive_path.name}, but restore failed: {e}\n"
+                f"  Manual restore: cp -r {backup} {claude_dir}"
+            )
+            result["success"] = True
+            return result
+    else:
+        # No backup - create empty .claude
+        claude_dir.mkdir(parents=True, exist_ok=True)
+
+    # Step 4: Preserve user data by copying from archive to restored dir
+    for name, src_path in preserved_data.items():
+        archived_src = archive_path / name
+        dest = claude_dir / name
+        if archived_src.exists() and not dest.exists():
+            try:
+                if archived_src.is_dir():
+                    shutil.copytree(archived_src, dest)
+                else:
+                    shutil.copy2(archived_src, dest)
+                result["preserved"].append(name)
+            except Exception:
+                pass  # Best effort
+
+    # Build summary message
+    msg_parts = ["Uninstalled successfully."]
+    msg_parts.append(f"  Archived v3 to: {archive_path.name}")
+    if result["restored_from"]:
+        msg_parts.append(f"  Restored from: {backup.name}")
+    else:
+        msg_parts.append("  No backup found (created empty .claude)")
+    if result["preserved"]:
+        msg_parts.append(f"  Preserved user data: {', '.join(result['preserved'])}")
+
+    result["message"] = "\n".join(msg_parts)
+    result["success"] = True
+    return result

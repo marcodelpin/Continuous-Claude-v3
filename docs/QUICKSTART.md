@@ -99,7 +99,7 @@ your-project/
 docker ps
 
 # Start the stack
-cd opc && docker compose up -d
+cd docker && docker compose up -d
 ```
 
 ### "No module found"

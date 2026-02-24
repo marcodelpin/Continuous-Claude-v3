@@ -58,6 +58,8 @@ ${pythonCode}
     const result = spawnSync("uv", ["run", "python", "-c", wrappedCode, ...args], {
       encoding: "utf-8",
       maxBuffer: 1024 * 1024,
+      timeout: 5e3,
+      // 5 second timeout - fail gracefully if DB unreachable
       cwd: opcDir,
       env: {
         ...process.env,
